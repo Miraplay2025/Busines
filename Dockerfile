@@ -10,6 +10,7 @@ RUN npm install -g npm@11.6.0
 
 COPY package.json ./
 
+# Instala todas as dependências
 RUN npm install
 
 COPY . .
