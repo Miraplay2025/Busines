@@ -2,8 +2,8 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <title>WPPConnect - Criar Sessão</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WhatsApp Web - Sessão</title>
   <style>
     body {
       font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -86,19 +86,6 @@
       overflow-y: auto;
     }
     .log-line { margin-bottom: 5px; }
-    .progress {
-      margin-top: 10px;
-      height: 10px;
-      background: #ddd;
-      border-radius: 8px;
-      overflow: hidden;
-    }
-    .progress-bar {
-      height: 100%;
-      width: 0%;
-      background: #4caf50;
-      transition: width 0.3s;
-    }
     @media (max-width: 500px) {
       input#sessionName { width: 60vw; }
       #qrContainer img { max-width: 200px; }
@@ -106,19 +93,17 @@
   </style>
 </head>
 <body>
-  <h1>WPPConnect - Criar Sessão</h1>
+  <h1>WhatsApp Web - Sessão</h1>
+
   <div class="input-group">
-    <input type="text" id="sessionName" placeholder="Nome da Sessão" />
-    <button onclick="createSession()">Criar Sessão</button>
-  </div>
-  <div id="status"></div>
-  <div id="qrContainer">
-    <img id="qrImg" src="" alt="QR Code">
-    <div id="qrName"></div>
+    <input type="text" id="sessionName" placeholder="Digite o nome da sessão">
+    <button id="startBtn">Iniciar Sessão</button>
   </div>
 
-  <div class="progress">
-    <div id="progressBar" class="progress-bar"></div>
+  <div id="status">Aguardando ação...</div>
+
+  <div id="qrContainer">
+    <img id="qrCode" src="" alt="QR Code">
   </div>
 
   <div id="logs"></div>
@@ -127,70 +112,39 @@
   <script>
     const socket = io();
 
-    function createSession() {
-      const name = document.getElementById('sessionName').value.trim();
-      if (!name) return alert('Digite o nome da sessão');
+    const startBtn = document.getElementById('startBtn');
+    const sessionNameInput = document.getElementById('sessionName');
+    const logsDiv = document.getElementById('logs');
+    const statusDiv = document.getElementById('status');
+    const qrContainer = document.getElementById('qrContainer');
+    const qrCodeImg = document.getElementById('qrCode');
 
-      // Reset UI
-      document.getElementById('status').innerText = '';
-      document.getElementById('qrContainer').style.display = 'none';
-      document.getElementById('logs').innerHTML = '';
-      updateProgress(0);
-
-      fetch('/create-session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionName: name })
-      })
-      .then(res => res.json())
-      .then(data => {
-        if (data.error) {
-          document.getElementById('status').innerText = `❌ ${data.error}`;
-          return;
-        }
-        socket.emit('joinSession', name);
-      })
-      .catch(err => {
-        console.error(err);
-        document.getElementById('status').innerText = '❌ Erro ao criar sessão';
-      });
-    }
-
-    // Atualiza barra de progresso
-    function updateProgress(percent) {
-      document.getElementById('progressBar').style.width = percent + '%';
-    }
-
-    // Recebe QR Code em base64
-    socket.on('qr', ({ qrDataUrl, sessionName }) => {
-      document.getElementById('qrImg').src = qrDataUrl;
-      document.getElementById('qrName').innerText = `QR Code da sessão: ${sessionName}`;
-      document.getElementById('qrContainer').style.display = 'flex';
-    });
-
-    socket.on('connected', () => {
-      document.getElementById('status').innerText = '✅ Sessão conectada com sucesso!';
-      document.getElementById('qrContainer').style.display = 'none';
-      updateProgress(100);
-    });
-
-    socket.on('disconnected', () => {
-      document.getElementById('status').innerText = '⚠️ Sessão desconectada';
-      document.getElementById('qrContainer').style.display = 'none';
-      updateProgress(0);
-    });
-
-    // Logs em tempo real
-    socket.on('log', ({ message, progress }) => {
-      const logsDiv = document.getElementById('logs');
-      const line = document.createElement('div');
-      line.classList.add('log-line');
-      line.innerText = progress !== null ? `${progress}% - ${message}` : message;
-      logsDiv.appendChild(line);
+    function addLog(msg) {
+      const p = document.createElement('p');
+      p.textContent = msg;
+      p.className = 'log-line';
+      logsDiv.appendChild(p);
       logsDiv.scrollTop = logsDiv.scrollHeight;
-      if (progress !== null) updateProgress(progress);
+    }
+
+    startBtn.addEventListener('click', () => {
+      const name = sessionNameInput.value.trim();
+      if (!name) return alert('Digite o nome da sessão!');
+      statusDiv.textContent = `Iniciando sessão: ${name}...`;
+      addLog(`🔧 Solicitando criação da sessão "${name}"...`);
+      socket.emit('start-session', name);
+    });
+
+    socket.on('log', (msg) => {
+      addLog(msg);
+      statusDiv.textContent = msg;
+    });
+
+    socket.on('qr', (dataUrl) => {
+      qrContainer.style.display = 'flex';
+      qrCodeImg.src = dataUrl;
+      addLog('📷 QR code atualizado');
     });
   </script>
 </body>
 </html>
-          
