@@ -62,8 +62,6 @@
           return;
         }
         document.getElementById('status').innerText = `✅ ${data.message}`;
-
-        // Entrar na sala do WebSocket para receber novos QRs
         socket.emit('joinSession', name);
       })
       .catch(err => {
@@ -72,7 +70,7 @@
       });
     }
 
-    // Recebe QR Code do servidor
+    // Recebe QR Code
     socket.on('qr', ({ qrPath, sessionName }) => {
       document.getElementById('qrImg').src = qrPath;
       document.getElementById('qrName').innerText = `Escaneie o QR Code - ${sessionName}.png`;
@@ -83,6 +81,12 @@
     // Sessão conectada
     socket.on('connected', () => {
       document.getElementById('status').innerText = '✅ Sessão conectada com sucesso!';
+      document.getElementById('qrContainer').style.display = 'none';
+    });
+
+    // Sessão desconectada
+    socket.on('disconnected', () => {
+      document.getElementById('status').innerText = '⚠️ Sessão desconectada';
       document.getElementById('qrContainer').style.display = 'none';
     });
   </script>
