@@ -131,7 +131,8 @@
       const name = document.getElementById('sessionName').value.trim();
       if (!name) return alert('Digite o nome da sessão');
 
-      document.getElementById('status').innerText = '🚀 Iniciando sessão...';
+      // Reset UI
+      document.getElementById('status').innerText = '';
       document.getElementById('qrContainer').style.display = 'none';
       document.getElementById('logs').innerHTML = '';
       updateProgress(0);
@@ -144,10 +145,9 @@
       .then(res => res.json())
       .then(data => {
         if (data.error) {
-          document.getElementById('status').innerText = `❌ Erro: ${data.error}`;
+          document.getElementById('status').innerText = `❌ ${data.error}`;
           return;
         }
-        document.getElementById('status').innerText = `✅ ${data.message}`;
         socket.emit('joinSession', name);
       })
       .catch(err => {
@@ -164,9 +164,8 @@
     // Recebe QR Code em base64
     socket.on('qr', ({ qrDataUrl, sessionName }) => {
       document.getElementById('qrImg').src = qrDataUrl;
-      document.getElementById('qrName').innerText = `📷 Escaneie o QR Code - ${sessionName}`;
+      document.getElementById('qrName').innerText = `QR Code da sessão: ${sessionName}`;
       document.getElementById('qrContainer').style.display = 'flex';
-      document.getElementById('status').innerText = '📱 Escaneie o QR Code com seu WhatsApp';
     });
 
     socket.on('connected', () => {
@@ -186,12 +185,12 @@
       const logsDiv = document.getElementById('logs');
       const line = document.createElement('div');
       line.classList.add('log-line');
-      line.innerText = `${progress}% - ${message}`;
+      line.innerText = progress !== null ? `${progress}% - ${message}` : message;
       logsDiv.appendChild(line);
       logsDiv.scrollTop = logsDiv.scrollHeight;
-      updateProgress(progress);
+      if (progress !== null) updateProgress(progress);
     });
   </script>
 </body>
 </html>
-      
+          
