@@ -6,9 +6,11 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "@adiwajshing/baileys": "git+https://github.com/adiwajshing/Baileys.git",
+    "@adiwajshing/baileys": "^5.0.26",
     "express": "^4.18.2",
     "qrcode": "^1.5.1",
     "cors": "^2.8.5"
   }
 }
+
+  
