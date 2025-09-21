@@ -14,20 +14,31 @@ app.use(express.json());
 app.use(express.static('public'));
 
 const sessions = {};
+const steps = [
+  "Iniciando sessão...",
+  "Inicializando navegador...",
+  "Carregando WhatsApp Web...",
+  "Página carregada",
+  "Injetando wapi.js...",
+  "WhatsApp Web carregado",
+  "Aguardando leitura do QR Code..."
+];
 
-// Função auxiliar para emitir logs em tempo real
-function logStep(sessionName, message, progress) {
-  console.log(`[${sessionName}] ${progress}% - ${message}`);
-  io.to(sessionName).emit('log', { message, progress });
+// 🔌 Captura todos os logs do console e envia ao Socket.io
+function logStep(sessionName, message, stepIndex = null) {
+  console.log(message);
+  io.to(sessionName).emit('log', {
+    message,
+    progress: stepIndex !== null ? Math.round(((stepIndex + 1) / steps.length) * 100) : null
+  });
 }
 
 // Socket.io
 io.on('connection', (socket) => {
   console.log('🔗 Novo cliente conectado');
-
   socket.on('joinSession', (sessionName) => {
-    console.log(`📡 Cliente entrou na sala da sessão: ${sessionName}`);
     socket.join(sessionName);
+    console.log(`📡 Cliente entrou na sala da sessão: ${sessionName}`);
   });
 });
 
@@ -37,46 +48,37 @@ app.post('/create-session', async (req, res) => {
   if (!sessionName) return res.status(400).json({ error: 'Nome da sessão é obrigatório' });
 
   try {
-    logStep(sessionName, 'Iniciando sessão...', 5);
+    logStep(sessionName, `🚀 Iniciando sessão: ${sessionName}`, 0);
 
     const client = await create({
       session: sessionName,
       headless: true,
       autoClose: 0,
       qrTimeout: 0,
+      catchQR: (qrCode, asciiQR, attempt) => {
+        logStep(sessionName, `📷 QR Code recebido (tentativa ${attempt})`, 6);
+        QRCode.toDataURL(qrCode).then((qrDataUrl) => {
+          io.to(sessionName).emit('qr', { qrDataUrl, sessionName });
+        });
+      },
       puppeteerOptions: {
         headless: true,
         args: ['--no-sandbox', '--disable-setuid-sandbox'],
       },
+      logQR: false
     });
 
     sessions[sessionName] = { client, connected: false };
-    logStep(sessionName, 'WhatsApp Web carregando...', 20);
 
-    // QR Code
-    client.onQrCode(async (qrCode, asciiQR, attempt) => {
-      logStep(sessionName, `Obtendo QR Code (tentativa ${attempt})`, 40);
-      try {
-        const qrDataUrl = await QRCode.toDataURL(qrCode); // Base64
-        io.to(sessionName).emit('qr', { qrDataUrl, sessionName });
-        logStep(sessionName, 'QR Code enviado ao cliente', 60);
-      } catch (err) {
-        console.error(`❌ Erro ao gerar QR base64:`, err);
-        logStep(sessionName, 'Erro ao gerar QR Code', 60);
-      }
-    });
-
-    // Estado da sessão
+    // Eventos principais
     client.onStateChange((state) => {
-      logStep(sessionName, `Estado da sessão: ${state}`, 80);
+      logStep(sessionName, `📡 Estado da sessão: ${state}`);
       if (state === 'CONNECTED') {
         sessions[sessionName].connected = true;
         io.to(sessionName).emit('connected');
-        logStep(sessionName, 'Sessão conectada com sucesso!', 100);
       } else if (state === 'DISCONNECTED') {
         sessions[sessionName].connected = false;
         io.to(sessionName).emit('disconnected');
-        logStep(sessionName, 'Sessão desconectada', 0);
       }
     });
 
