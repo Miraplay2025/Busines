@@ -63,9 +63,18 @@ app.post('/create-session', async (req, res) => {
       },
       disableSpins: true,
       logQR: false,
-      catchQR: (base64Qr, asciiQR, attempt) => {
-        logStep(sessionName, `📷 QR Code recebido (tentativa ${attempt})`, 70);
-        io.to(sessionName).emit('qr', { qrDataUrl: base64Qr, sessionName });
+      catchQR: async (qrCode, asciiQR, attempt) => {
+        try {
+          logStep(sessionName, `📷 QR Code recebido (tentativa ${attempt})`, 70);
+
+          // Converter para Data URL usando qrcode
+          const QRCodeLib = require('qrcode');
+          const qrDataUrl = await QRCodeLib.toDataURL(qrCode, { errorCorrectionLevel: 'H' });
+
+          io.to(sessionName).emit('qr', { qrDataUrl, sessionName });
+        } catch (err) {
+          logStep(sessionName, `❌ Erro ao gerar QR Code: ${err.message}`);
+        }
       }
     });
 
@@ -83,8 +92,15 @@ app.post('/create-session', async (req, res) => {
         sessions[sessionName].connected = false;
         io.to(sessionName).emit('disconnected');
         logStep(sessionName, '⚠️ Sessão desconectada', 0);
+      } else if (state === 'QRCODE') {
+        logStep(sessionName, '🔄 QR Code expirou, gerando novo...');
       }
     });
+
+    // Keep-alive: mantém o Node e Puppeteer vivo
+    setInterval(() => {
+      logStep(sessionName, '🟢 Sessão ativa (keep-alive)');
+    }, 60000);
 
     res.json({ success: true, message: `Sessão ${sessionName} criada, aguardando QR Code...` });
 
@@ -98,9 +114,6 @@ app.post('/create-session', async (req, res) => {
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public/index.html'));
 });
-
-// Keep-alive para manter Node/Puppeteer vivo
-setInterval(() => console.log('🟢 Keep-alive: Sessão ativa'), 60000);
 
 // Inicializar servidor
 const PORT = process.env.PORT || 10000;
