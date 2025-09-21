@@ -3,7 +3,6 @@ const cors = require('cors');
 const http = require('http');
 const { Server } = require('socket.io');
 const { create } = require('@wppconnect-team/wppconnect');
-const QRCode = require('qrcode');
 const path = require('path');
 const fs = require('fs');
 
@@ -16,22 +15,13 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 const sessions = [];
-const steps = [
-  "Iniciando sessão...",
-  "Inicializando navegador...",
-  "Carregando WhatsApp Web...",
-  "Página carregada",
-  "Injetando wapi.js...",
-  "WhatsApp Web carregado",
-  "Aguardando leitura do QR Code..."
-];
 
 // 🔌 Função de log
 function logStep(sessionName, message, stepIndex = null) {
   console.log(`[${sessionName}] ${message}`);
   io.to(sessionName).emit('log', {
     message,
-    progress: stepIndex !== null ? Math.round(((stepIndex + 1) / steps.length) * 100) : null
+    progress: stepIndex !== null ? Math.round(((stepIndex + 1) / 10) * 100) : null
   });
 }
 
@@ -52,23 +42,17 @@ app.post('/create-session', async (req, res) => {
   try {
     logStep(sessionName, `🚀 Criando sessão: ${sessionName}`, 0);
 
-    // Gerar pasta temporária para sessão
+    // Pasta exclusiva para sessão
     const sessionDir = path.join('/tmp', `wppconnect-${sessionName}`);
     if (!fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir, { recursive: true });
 
     const client = await create({
       session: sessionName,
-      sessionDataPath: sessionDir,   // Pasta exclusiva para evitar conflito
+      sessionDataPath: sessionDir,
       headless: true,
       autoClose: 0,
       qrTimeout: 0,
-      killProcessOnBrowserClose: true, // Fecha navegador anterior
-      catchQR: (qrCode, asciiQR, attempt) => {
-        logStep(sessionName, `📷 QR Code recebido (tentativa ${attempt})`, 6);
-        QRCode.toDataURL(qrCode).then(qrDataUrl => {
-          io.to(sessionName).emit('qr', { qrDataUrl, sessionName });
-        }).catch(err => logStep(sessionName, `❌ Erro ao gerar QR Code: ${err}`));
-      },
+      killProcessOnBrowserClose: true,
       puppeteerOptions: {
         headless: true,
         args: [
@@ -80,7 +64,12 @@ app.post('/create-session', async (req, res) => {
         ]
       },
       logQR: false,
-      disableSpins: true
+      disableSpins: true,
+      catchQR: (base64Qr, asciiQR, attempt) => {
+        // base64Qr já é compacto e seguro para exibir
+        logStep(sessionName, `📷 QR Code recebido (tentativa ${attempt})`);
+        io.to(sessionName).emit('qr', { qrDataUrl: base64Qr, sessionName });
+      }
     });
 
     sessions.push({ sessionName, client, connected: false });
@@ -95,6 +84,7 @@ app.post('/create-session', async (req, res) => {
     });
 
     res.json({ success: true, message: `Sessão ${sessionName} criada, aguardando QR Code...` });
+
   } catch (err) {
     console.error(`❌ Erro ao criar sessão ${sessionName}:`, err);
     res.status(500).json({ error: 'Erro ao criar sessão', details: err.message });
@@ -111,6 +101,5 @@ setInterval(() => console.log('🟢 Keep-alive'), 60000);
 
 // Inicializar servidor
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`🌍 Servidor rodando em http://localhost:${PORT}`);
-});
+server.listen(PORT, () => console.log(`🌍 Servidor rodando em http://localhost:${PORT}`));
+      
