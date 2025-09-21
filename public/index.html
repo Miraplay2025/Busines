@@ -72,6 +72,33 @@
       border-radius: 12px;
       margin-bottom: 10px;
     }
+    #logs {
+      margin-top: 20px;
+      width: 100%;
+      max-width: 500px;
+      background: rgba(255,255,255,0.9);
+      border-radius: 12px;
+      padding: 15px;
+      box-shadow: 0 6px 12px rgba(0,0,0,0.2);
+      font-size: 14px;
+      line-height: 1.4;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    .log-line { margin-bottom: 5px; }
+    .progress {
+      margin-top: 10px;
+      height: 10px;
+      background: #ddd;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .progress-bar {
+      height: 100%;
+      width: 0%;
+      background: #4caf50;
+      transition: width 0.3s;
+    }
     @media (max-width: 500px) {
       input#sessionName { width: 60vw; }
       #qrContainer img { max-width: 200px; }
@@ -90,6 +117,12 @@
     <div id="qrName"></div>
   </div>
 
+  <div class="progress">
+    <div id="progressBar" class="progress-bar"></div>
+  </div>
+
+  <div id="logs"></div>
+
   <script src="/socket.io/socket.io.js"></script>
   <script>
     const socket = io();
@@ -98,8 +131,10 @@
       const name = document.getElementById('sessionName').value.trim();
       if (!name) return alert('Digite o nome da sessão');
 
-      document.getElementById('status').innerText = 'Iniciando sessão...';
+      document.getElementById('status').innerText = '🚀 Iniciando sessão...';
       document.getElementById('qrContainer').style.display = 'none';
+      document.getElementById('logs').innerHTML = '';
+      updateProgress(0);
 
       fetch('/create-session', {
         method: 'POST',
@@ -121,23 +156,42 @@
       });
     }
 
+    // Atualiza barra de progresso
+    function updateProgress(percent) {
+      document.getElementById('progressBar').style.width = percent + '%';
+    }
+
     // Recebe QR Code em base64
     socket.on('qr', ({ qrDataUrl, sessionName }) => {
       document.getElementById('qrImg').src = qrDataUrl;
-      document.getElementById('qrName').innerText = `Escaneie o QR Code - ${sessionName}`;
+      document.getElementById('qrName').innerText = `📷 Escaneie o QR Code - ${sessionName}`;
       document.getElementById('qrContainer').style.display = 'flex';
-      document.getElementById('status').innerText = '📷 Escaneie o QR Code com seu WhatsApp';
+      document.getElementById('status').innerText = '📱 Escaneie o QR Code com seu WhatsApp';
     });
 
     socket.on('connected', () => {
       document.getElementById('status').innerText = '✅ Sessão conectada com sucesso!';
       document.getElementById('qrContainer').style.display = 'none';
+      updateProgress(100);
     });
 
     socket.on('disconnected', () => {
       document.getElementById('status').innerText = '⚠️ Sessão desconectada';
       document.getElementById('qrContainer').style.display = 'none';
+      updateProgress(0);
+    });
+
+    // Logs em tempo real
+    socket.on('log', ({ message, progress }) => {
+      const logsDiv = document.getElementById('logs');
+      const line = document.createElement('div');
+      line.classList.add('log-line');
+      line.innerText = `${progress}% - ${message}`;
+      logsDiv.appendChild(line);
+      logsDiv.scrollTop = logsDiv.scrollHeight;
+      updateProgress(progress);
     });
   </script>
 </body>
 </html>
+      
