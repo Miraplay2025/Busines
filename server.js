@@ -1,4 +1,4 @@
-const express = require('express');
+ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const cors = require('cors');
@@ -16,6 +16,7 @@ app.use(express.static('sessions'));
 
 const sessions = {};
 
+// Rota para criar sessão
 app.post('/create-session', async (req, res) => {
   const { sessionName } = req.body;
   if (!sessionName) {
@@ -38,7 +39,14 @@ app.post('/create-session', async (req, res) => {
       autoClose: 0,
       qrTimeout: 0,
       puppeteerOptions: {
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        headless: true,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--disable-gpu',
+        ],
       },
     });
 
@@ -67,7 +75,7 @@ app.post('/create-session', async (req, res) => {
       });
     });
 
-    // Evento de status
+    // Evento de status da sessão
     client.onStateChange((state) => {
       console.log(`📡 Estado da sessão ${sessionName}: ${state}`);
       if (state === 'CONNECTED') {
@@ -88,6 +96,7 @@ app.post('/create-session', async (req, res) => {
   }
 });
 
+// Rota para consultar status da sessão
 app.get('/session/:name', (req, res) => {
   const { name } = req.params;
   const session = sessions[name];
@@ -102,6 +111,8 @@ app.get('/session/:name', (req, res) => {
   });
 });
 
+// Inicializa servidor
 server.listen(3000, () => {
   console.log('🌍 Servidor rodando em http://localhost:3000');
 });
+     
