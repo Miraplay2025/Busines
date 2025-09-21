@@ -16,7 +16,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 const sessions = {};
 
-// Função de log em tempo real
+// Função para enviar logs e progresso para o front-end
 function logStep(sessionName, message, progress = null) {
   console.log(`[${sessionName}] ${message}`);
   io.to(sessionName).emit('log', { message, progress });
@@ -39,18 +39,18 @@ app.post('/create-session', async (req, res) => {
   try {
     logStep(sessionName, `🚀 Criando sessão: ${sessionName}`, 0);
 
-    // Pasta exclusiva para sessão
+    // Pasta exclusiva por sessão para evitar conflitos
     const sessionDir = path.join('/tmp', `wppconnect-${sessionName}-${Date.now()}`);
     if (!fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir, { recursive: true });
     logStep(sessionName, `📁 Diretório da sessão criado: ${sessionDir}`, 5);
 
     const client = await create({
       session: sessionName,
-      sessionDataPath: sessionDir,
+      sessionDataPath: sessionDir,  // Pasta separada por sessão
       headless: true,
-      autoClose: 0,
-      qrTimeout: 0,
-      killProcessOnBrowserClose: true,
+      autoClose: 0,                 // Mantém o processo vivo
+      qrTimeout: 0,                 // QR não expira
+      killProcessOnBrowserClose: false,
       puppeteerOptions: {
         headless: true,
         args: [
@@ -61,8 +61,8 @@ app.post('/create-session', async (req, res) => {
           '--disable-gpu'
         ]
       },
-      logQR: false,
       disableSpins: true,
+      logQR: false,
       catchQR: (base64Qr, asciiQR, attempt) => {
         logStep(sessionName, `📷 QR Code recebido (tentativa ${attempt})`, 70);
         io.to(sessionName).emit('qr', { qrDataUrl: base64Qr, sessionName });
@@ -99,9 +99,9 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public/index.html'));
 });
 
-// Keep-alive para manter processo ativo
-setInterval(() => console.log('🟢 Keep-alive'), 60000);
+// Keep-alive para manter Node/Puppeteer vivo
+setInterval(() => console.log('🟢 Keep-alive: Sessão ativa'), 60000);
 
 // Inicializar servidor
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => console.log(`🌍 Servidor rodando em http://localhost:${PORT}`));
