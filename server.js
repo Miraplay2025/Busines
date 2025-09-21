@@ -12,7 +12,7 @@ const io = new Server(server);
 
 app.use(cors());
 app.use(express.json());
-app.use(express.static('public'));
+app.use(express.static('sessions'));
 
 const sessions = {};
 
@@ -35,9 +35,11 @@ app.post('/create-session', async (req, res) => {
     const client = await create({
       session: sessionName,
       headless: true,
-      puppeteerOptions: ['--no-sandbox', '--disable-setuid-sandbox'],
       autoClose: 0,
-      qrTimeout: 0
+      qrTimeout: 0,
+      puppeteerOptions: {
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      },
     });
 
     console.log(`✅ Cliente criado para sessão: ${sessionName}`);
@@ -61,7 +63,7 @@ app.post('/create-session', async (req, res) => {
       io.emit('qrCode', {
         session: sessionName,
         qrPath,
-        message: `📷 Escaneie o QR Code - ${sessionName}.png`
+        message: `📷 Escaneie o QR Code - ${sessionName}.png`,
       });
     });
 
@@ -96,7 +98,7 @@ app.get('/session/:name', (req, res) => {
 
   res.json({
     connected: session.connected,
-    qrPath: session.qrPath
+    qrPath: session.qrPath,
   });
 });
 
