@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+ <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
@@ -71,6 +71,7 @@
       border-radius: 16px;
       box-shadow: 0 8px 16px rgba(0,0,0,0.2);
       display: inline-block;
+      text-align: center;
     }
 
     #qrContainer img {
@@ -78,6 +79,12 @@
       width: 100%;
       height: auto;
       border-radius: 12px;
+    }
+
+    #qrName {
+      margin-top: 12px;
+      font-weight: bold;
+      color: #333;
     }
 
     @media (max-width: 500px) {
@@ -99,7 +106,10 @@
   </div>
 
   <div id="status"></div>
-  <div id="qrContainer"></div>
+  <div id="qrContainer" style="display:none;">
+    <img id="qrImg" src="" alt="QR Code"/>
+    <div id="qrName"></div>
+  </div>
 
   <script>
     async function createSession() {
@@ -107,30 +117,38 @@
       if(!name) return alert('Digite o nome da sessão');
 
       document.getElementById('status').innerText = 'Iniciando sessão...';
+      document.getElementById('qrContainer').style.display = 'none';
 
-      const res = await fetch('/create-session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionName: name })
-      });
-      const data = await res.json();
-      document.getElementById('status').innerText = data.message || 'Sessão iniciada';
+      try {
+        const res = await fetch('/create-session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionName: name })
+        });
+        const data = await res.json();
 
-      // Atualiza QR Code a cada 2s
-      const interval = setInterval(async () => {
+        if(data.error) {
+          document.getElementById('status').innerText = `❌ Erro: ${data.error}`;
+          return;
+        }
+
+        document.getElementById('status').innerText = `✅ ${data.message}`;
+
+        // Exibe o QR Code e o nome do arquivo
         const qrRes = await fetch(`/session/${name}`);
         const qrData = await qrRes.json();
 
-        if(qrData.connected) {
-          document.getElementById('status').innerText = '✅ Sessão conectada com sucesso!';
-          document.getElementById('qrContainer').innerHTML = '';
-          clearInterval(interval);
-        } else if(qrData.qr) {
-          document.getElementById('qrContainer').innerHTML = `<img src="${qrData.qr}" alt="QR Code" />`;
-          document.getElementById('status').innerText = '📷 Escaneie o QR Code com seu WhatsApp';
+        if(qrData.qrPath) {
+          document.getElementById('qrImg').src = qrData.qrPath;
+          document.getElementById('qrName').innerText = `Escaneie o QR Code - ${name}.png`;
+          document.getElementById('qrContainer').style.display = 'block';
         }
-      }, 2000);
+      } catch(err) {
+        document.getElementById('status').innerText = `❌ Erro ao criar sessão`;
+        console.error(err);
+      }
     }
   </script>
 </body>
 </html>
+     
