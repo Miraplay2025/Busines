@@ -12,7 +12,6 @@ app.use(express.static('public'));
 
 const sessions = {}; // Armazena sessões em memória
 
-// Função para log colorido no console
 const log = (type, msg) => {
     const colors = {
         info: "\x1b[36m%s\x1b[0m",
@@ -41,10 +40,8 @@ app.post('/create-session', async (req, res) => {
             printQRInTerminal: false
         });
 
-        // Salva a sessão
         sock.ev.on('creds.update', saveState);
 
-        // Atualiza status do QR Code e conexão
         sock.ev.on('connection.update', async (update) => {
             const { connection, qr } = update;
 
@@ -56,8 +53,8 @@ app.post('/create-session', async (req, res) => {
 
             if(connection === 'open') {
                 sessions[sessionName].connected = true;
-                sessions[sessionName].qrImage = null; // Oculta QR
-                sessions[sessionName].sessionData = state; // Armazena tokens
+                sessions[sessionName].qrImage = null;
+                sessions[sessionName].sessionData = state;
                 log('success', `Sessão "${sessionName}" conectada com sucesso! 🎉`);
             }
 
