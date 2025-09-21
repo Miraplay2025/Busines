@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+ <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
@@ -140,11 +140,12 @@
       statusDiv.textContent = msg;
     });
 
-    socket.on('qr', (dataUrl) => {
+    socket.on('qr', (base64) => {
       qrContainer.style.display = 'flex';
-      qrCodeImg.src = dataUrl;
+      qrCodeImg.src = base64; // QR code em Base64
       addLog('📷 QR code atualizado');
     });
   </script>
 </body>
 </html>
+     
