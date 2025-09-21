@@ -15,6 +15,12 @@ app.use(express.static('public'));
 
 const sessions = {};
 
+// Função auxiliar para emitir logs em tempo real
+function logStep(sessionName, message, progress) {
+  console.log(`[${sessionName}] ${progress}% - ${message}`);
+  io.to(sessionName).emit('log', { message, progress });
+}
+
 // Socket.io
 io.on('connection', (socket) => {
   console.log('🔗 Novo cliente conectado');
@@ -31,7 +37,7 @@ app.post('/create-session', async (req, res) => {
   if (!sessionName) return res.status(400).json({ error: 'Nome da sessão é obrigatório' });
 
   try {
-    console.log(`🚀 Iniciando sessão: ${sessionName}`);
+    logStep(sessionName, 'Iniciando sessão...', 5);
 
     const client = await create({
       session: sessionName,
@@ -45,27 +51,32 @@ app.post('/create-session', async (req, res) => {
     });
 
     sessions[sessionName] = { client, connected: false };
+    logStep(sessionName, 'WhatsApp Web carregando...', 20);
 
     // QR Code
     client.onQrCode(async (qrCode, asciiQR, attempt) => {
-      console.log(`📷 QR Code recebido (tentativa ${attempt}) para sessão ${sessionName}`);
+      logStep(sessionName, `Obtendo QR Code (tentativa ${attempt})`, 40);
       try {
-        const qrDataUrl = await QRCode.toDataURL(qrCode); // Gera base64
+        const qrDataUrl = await QRCode.toDataURL(qrCode); // Base64
         io.to(sessionName).emit('qr', { qrDataUrl, sessionName });
+        logStep(sessionName, 'QR Code enviado ao cliente', 60);
       } catch (err) {
         console.error(`❌ Erro ao gerar QR base64:`, err);
+        logStep(sessionName, 'Erro ao gerar QR Code', 60);
       }
     });
 
     // Estado da sessão
     client.onStateChange((state) => {
-      console.log(`📡 Estado da sessão ${sessionName}: ${state}`);
+      logStep(sessionName, `Estado da sessão: ${state}`, 80);
       if (state === 'CONNECTED') {
         sessions[sessionName].connected = true;
         io.to(sessionName).emit('connected');
+        logStep(sessionName, 'Sessão conectada com sucesso!', 100);
       } else if (state === 'DISCONNECTED') {
         sessions[sessionName].connected = false;
         io.to(sessionName).emit('disconnected');
+        logStep(sessionName, 'Sessão desconectada', 0);
       }
     });
 
