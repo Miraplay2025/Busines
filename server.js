@@ -1,4 +1,4 @@
-     const express = require('express');
+const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const { Client, LocalAuth } = require('whatsapp-web.js');
@@ -45,8 +45,9 @@ io.on('connection', (socket) => {
         client.on('qr', async (qr) => {
             socket.emit('log', '📷 QR code gerado, aguardando escaneamento...');
             try {
-                const qrDataUrl = await qrcode.toDataURL(qr);
-                socket.emit('qr', qrDataUrl);
+                // Retorna QR code em Base64
+                const qrBase64 = await qrcode.toDataURL(qr);
+                socket.emit('qr', qrBase64);
                 socket.emit('log', '📌 QR code enviado para o HTML');
             } catch (err) {
                 socket.emit('log', '❌ Erro ao gerar QR code: ' + err.message);
@@ -85,5 +86,3 @@ io.on('connection', (socket) => {
 });
 
 server.listen(3000, () => console.log('🌐 Servidor rodando em http://localhost:3000'));
-Oretirne o qrcode como base64
-Reivie o js completo  
