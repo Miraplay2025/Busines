@@ -14,15 +14,12 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-const sessions = [];
+const sessions = {};
 
-// 🔌 Função de log
-function logStep(sessionName, message, stepIndex = null) {
+// Função de log em tempo real
+function logStep(sessionName, message, progress = null) {
   console.log(`[${sessionName}] ${message}`);
-  io.to(sessionName).emit('log', {
-    message,
-    progress: stepIndex !== null ? Math.round(((stepIndex + 1) / 10) * 100) : null
-  });
+  io.to(sessionName).emit('log', { message, progress });
 }
 
 // Socket.io
@@ -30,7 +27,7 @@ io.on('connection', (socket) => {
   console.log('🔗 Novo cliente conectado');
   socket.on('joinSession', (sessionName) => {
     socket.join(sessionName);
-    console.log(`📡 Cliente entrou na sala da sessão: ${sessionName}`);
+    logStep(sessionName, '📡 Cliente entrou na sala da sessão');
   });
 });
 
@@ -43,8 +40,9 @@ app.post('/create-session', async (req, res) => {
     logStep(sessionName, `🚀 Criando sessão: ${sessionName}`, 0);
 
     // Pasta exclusiva para sessão
-    const sessionDir = path.join('/tmp', `wppconnect-${sessionName}`);
+    const sessionDir = path.join('/tmp', `wppconnect-${sessionName}-${Date.now()}`);
     if (!fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir, { recursive: true });
+    logStep(sessionName, `📁 Diretório da sessão criado: ${sessionDir}`, 5);
 
     const client = await create({
       session: sessionName,
@@ -66,20 +64,25 @@ app.post('/create-session', async (req, res) => {
       logQR: false,
       disableSpins: true,
       catchQR: (base64Qr, asciiQR, attempt) => {
-        // base64Qr já é compacto e seguro para exibir
-        logStep(sessionName, `📷 QR Code recebido (tentativa ${attempt})`);
+        logStep(sessionName, `📷 QR Code recebido (tentativa ${attempt})`, 70);
         io.to(sessionName).emit('qr', { qrDataUrl: base64Qr, sessionName });
       }
     });
 
-    sessions.push({ sessionName, client, connected: false });
+    sessions[sessionName] = { client, connected: false };
+    logStep(sessionName, '✅ Cliente WPPConnect inicializado', 80);
 
+    // Eventos de estado
     client.onStateChange(state => {
       logStep(sessionName, `📡 Estado da sessão: ${state}`);
       if (state === 'CONNECTED') {
+        sessions[sessionName].connected = true;
         io.to(sessionName).emit('connected');
+        logStep(sessionName, '✅ Sessão conectada', 100);
       } else if (state === 'DISCONNECTED') {
+        sessions[sessionName].connected = false;
         io.to(sessionName).emit('disconnected');
+        logStep(sessionName, '⚠️ Sessão desconectada', 0);
       }
     });
 
@@ -96,10 +99,9 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public/index.html'));
 });
 
-// Keep-alive
+// Keep-alive para manter processo ativo
 setInterval(() => console.log('🟢 Keep-alive'), 60000);
 
 // Inicializar servidor
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`🌍 Servidor rodando em http://localhost:${PORT}`));
-      
