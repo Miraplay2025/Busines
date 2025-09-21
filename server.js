@@ -16,29 +16,38 @@ app.use(express.static('public'));
 
 const sessions = {};
 
-// Criar sessão
 app.post('/create-session', async (req, res) => {
   const { sessionName } = req.body;
-  if (!sessionName) return res.status(400).json({ error: 'Nome da sessão é obrigatório' });
+  if (!sessionName) {
+    console.error('❌ Nenhum nome de sessão informado');
+    return res.status(400).json({ error: 'Nome da sessão é obrigatório' });
+  }
 
   try {
+    console.log(`🚀 Iniciando criação da sessão: ${sessionName}`);
+
     const sessionPath = path.join(__dirname, 'sessions', sessionName);
-    if (!fs.existsSync(sessionPath)) fs.mkdirSync(sessionPath, { recursive: true });
+    if (!fs.existsSync(sessionPath)) {
+      fs.mkdirSync(sessionPath, { recursive: true });
+      console.log(`📂 Pasta criada para sessão: ${sessionPath}`);
+    }
 
     const client = await create({
       session: sessionName,
       headless: true,
-      puppeteerOptions: {
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
-      },
+      puppeteerOptions: ['--no-sandbox', '--disable-setuid-sandbox'],
       autoClose: 0,
       qrTimeout: 0
     });
+
+    console.log(`✅ Cliente criado para sessão: ${sessionName}`);
 
     sessions[sessionName] = { client, connected: false, qrPath: null };
 
     // Evento de QR Code
     client.onQrCode((base64Qr, asciiQR, attempt, urlCode) => {
+      console.log(`📷 QR Code recebido (tentativa ${attempt}) para sessão ${sessionName}`);
+
       const qrFile = path.join(sessionPath, 'qrcode.png');
       const qrData = base64Qr.replace('data:image/png;base64,', '');
       fs.writeFileSync(qrFile, qrData, 'base64');
@@ -46,9 +55,9 @@ app.post('/create-session', async (req, res) => {
       const qrPath = `/sessions/${sessionName}/qrcode.png`;
       sessions[sessionName].qrPath = qrPath;
 
-      console.log(`📷 QR Code gerado para sessão ${sessionName} (tentativa ${attempt})`);
+      console.log(`💾 QR Code salvo em: ${qrFile}`);
+      console.log(`🔗 Caminho público: ${qrPath}`);
 
-      // Envia para o front pelo socket
       io.emit('qrCode', {
         session: sessionName,
         qrPath,
@@ -58,6 +67,7 @@ app.post('/create-session', async (req, res) => {
 
     // Evento de status
     client.onStateChange((state) => {
+      console.log(`📡 Estado da sessão ${sessionName}: ${state}`);
       if (state === 'CONNECTED') {
         console.log(`✅ Sessão ${sessionName} conectada com sucesso!`);
         sessions[sessionName].connected = true;
@@ -69,18 +79,20 @@ app.post('/create-session', async (req, res) => {
       }
     });
 
-    res.json({ success: true, message: 'Sessão iniciada, aguarde QR Code...' });
+    res.json({ success: true, message: `Sessão ${sessionName} criada, aguarde o QR Code...` });
   } catch (err) {
-    console.error(err);
+    console.error(`❌ Erro ao criar sessão ${sessionName}:`, err);
     res.status(500).json({ error: 'Erro ao criar sessão', details: err.message });
   }
 });
 
-// Retornar status da sessão
 app.get('/session/:name', (req, res) => {
   const { name } = req.params;
   const session = sessions[name];
-  if (!session) return res.status(404).json({ error: 'Sessão não encontrada' });
+  if (!session) {
+    console.error(`❌ Sessão ${name} não encontrada`);
+    return res.status(404).json({ error: 'Sessão não encontrada' });
+  }
 
   res.json({
     connected: session.connected,
@@ -89,6 +101,5 @@ app.get('/session/:name', (req, res) => {
 });
 
 server.listen(3000, () => {
-  console.log('🚀 Servidor rodando em http://localhost:3000');
+  console.log('🌍 Servidor rodando em http://localhost:3000');
 });
-
