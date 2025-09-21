@@ -12,8 +12,6 @@ const io = new Server(server);
 
 app.use(cors());
 app.use(express.json());
-
-// Serve arquivos estáticos
 app.use(express.static('public'));
 app.use('/sessions', express.static(path.join(__dirname, 'sessions')));
 
@@ -29,12 +27,10 @@ io.on('connection', (socket) => {
   });
 });
 
-// Rota para criar sessão
+// Criação de sessão
 app.post('/create-session', async (req, res) => {
   const { sessionName } = req.body;
-  if (!sessionName) {
-    return res.status(400).json({ error: 'Nome da sessão é obrigatório' });
-  }
+  if (!sessionName) return res.status(400).json({ error: 'Nome da sessão é obrigatório' });
 
   const sessionPath = path.join(__dirname, 'sessions', sessionName);
   if (!fs.existsSync(sessionPath)) fs.mkdirSync(sessionPath, { recursive: true });
@@ -57,11 +53,11 @@ app.post('/create-session', async (req, res) => {
           '--disable-accelerated-2d-canvas',
           '--no-first-run',
           '--no-zygote',
+          '--single-process',
         ],
       },
     });
 
-    console.log(`✅ Cliente criado para sessão: ${sessionName}`);
     sessions[sessionName] = { client, connected: false, qrPath: null };
 
     // QR Code
@@ -97,12 +93,15 @@ app.post('/create-session', async (req, res) => {
       }
     });
 
-    // Retorna resposta imediata
+    // Evento para garantir que Node não feche prematuramente
+    client.onStreamChange((stream) => {
+      console.log(`🔹 Stream atualizado para sessão ${sessionName}:`, stream);
+    });
+
     res.json({ success: true, message: `Sessão ${sessionName} criada, aguardando QR Code...` });
   } catch (err) {
     console.error(`❌ Erro ao criar sessão ${sessionName}:`, err);
     res.status(500).json({ error: 'Erro ao criar sessão', details: err.message });
-    io.to(sessionName).emit('error', { message: `Falha ao iniciar sessão: ${err.message}` });
   }
 });
 
@@ -111,7 +110,7 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Evita travamento caso Node receba SIGTERM
+// Evita encerramento prematuro
 process.on('SIGTERM', () => {
   console.log('🛑 Recebido SIGTERM, encerrando servidor...');
   server.close(() => process.exit(0));
