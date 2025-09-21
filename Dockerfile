@@ -2,7 +2,7 @@ FROM node:18-slim
 
 WORKDIR /app
 
-# Instalar dependências necessárias do Chromium
+# Instalar dependências do Chromium
 RUN apt-get update && apt-get install -y \
   wget \
   ca-certificates \
@@ -40,19 +40,16 @@ RUN apt-get update && apt-get install -y \
   xdg-utils \
   libu2f-udev \
   libvulkan1 \
-  --no-install-recommends && \
-  rm -rf /var/lib/apt/lists/*
+  --no-install-recommends && rm -rf /var/lib/apt/lists/*
 
 # Copia package.json e package-lock.json
 COPY package*.json ./
 
-# Instalar dependências + Chromium via Puppeteer
-RUN npm install --production && \
-    npx puppeteer@latest install chrome
+# Instala dependências
+RUN npm install --production && npx puppeteer install chrome
 
 # Copia todo o projeto
 COPY . .
 
 EXPOSE 3000
-
 CMD ["npm", "start"]
