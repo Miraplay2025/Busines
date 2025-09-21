@@ -1,4 +1,4 @@
- <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
@@ -70,8 +70,9 @@
       padding: 20px;
       border-radius: 16px;
       box-shadow: 0 8px 16px rgba(0,0,0,0.2);
-      display: inline-block;
-      text-align: center;
+      display: none;
+      flex-direction: column;
+      align-items: center;
     }
 
     #qrContainer img {
@@ -79,12 +80,7 @@
       width: 100%;
       height: auto;
       border-radius: 12px;
-    }
-
-    #qrName {
-      margin-top: 12px;
-      font-weight: bold;
-      color: #333;
+      margin-bottom: 10px;
     }
 
     @media (max-width: 500px) {
@@ -106,8 +102,8 @@
   </div>
 
   <div id="status"></div>
-  <div id="qrContainer" style="display:none;">
-    <img id="qrImg" src="" alt="QR Code"/>
+  <div id="qrContainer">
+    <img id="qrImg" src="" alt="QR Code">
     <div id="qrName"></div>
   </div>
 
@@ -117,7 +113,6 @@
       if(!name) return alert('Digite o nome da sessão');
 
       document.getElementById('status').innerText = 'Iniciando sessão...';
-      document.getElementById('qrContainer').style.display = 'none';
 
       try {
         const res = await fetch('/create-session', {
@@ -125,6 +120,7 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ sessionName: name })
         });
+
         const data = await res.json();
 
         if(data.error) {
@@ -134,21 +130,17 @@
 
         document.getElementById('status').innerText = `✅ ${data.message}`;
 
-        // Exibe o QR Code e o nome do arquivo
-        const qrRes = await fetch(`/session/${name}`);
-        const qrData = await qrRes.json();
-
-        if(qrData.qrPath) {
-          document.getElementById('qrImg').src = qrData.qrPath;
+        if(data.qrPath) {
+          document.getElementById('qrImg').src = data.qrPath;
           document.getElementById('qrName').innerText = `Escaneie o QR Code - ${name}.png`;
-          document.getElementById('qrContainer').style.display = 'block';
+          document.getElementById('qrContainer').style.display = 'flex';
         }
+
       } catch(err) {
-        document.getElementById('status').innerText = `❌ Erro ao criar sessão`;
         console.error(err);
+        document.getElementById('status').innerText = '❌ Erro ao criar sessão';
       }
     }
   </script>
 </body>
 </html>
-     
