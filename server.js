@@ -32,9 +32,6 @@ app.post('/create-session', async (req, res) => {
   const { sessionName } = req.body;
   if (!sessionName) return res.status(400).json({ error: 'Nome da sessão é obrigatório' });
 
-  const sessionPath = path.join(__dirname, 'sessions', sessionName);
-  if (!fs.existsSync(sessionPath)) fs.mkdirSync(sessionPath, { recursive: true });
-
   try {
     console.log(`🚀 Iniciando sessão: ${sessionName}`);
 
@@ -58,25 +55,13 @@ app.post('/create-session', async (req, res) => {
       },
     });
 
-    sessions[sessionName] = { client, connected: false, qrPath: null };
+    sessions[sessionName] = { client, connected: false, qrCode: null };
 
-    // QR Code
-    client.onQrCode((base64Qr, asciiQR, attempt) => {
+    // Evento QR Code
+    client.onQrCode((qrCode, asciiQR, attempt) => {
       console.log(`📷 QR Code recebido (tentativa ${attempt}) para sessão ${sessionName}`);
-
-      try {
-        const qrFile = path.join(sessionPath, 'qrcode.png');
-        const qrData = base64Qr.replace('data:image/png;base64,', '');
-        fs.writeFileSync(qrFile, qrData, 'base64');
-
-        const qrPath = `/sessions/${sessionName}/qrcode.png`;
-        sessions[sessionName].qrPath = qrPath;
-
-        io.to(sessionName).emit('qr', { qrPath, sessionName });
-      } catch (err) {
-        console.error(`❌ Falha ao salvar QR Code da sessão ${sessionName}:`, err);
-        io.to(sessionName).emit('error', { message: 'Erro ao salvar QR Code' });
-      }
+      sessions[sessionName].qrCode = qrCode;
+      io.to(sessionName).emit('qr', { qrCode, sessionName });
     });
 
     // Estado da sessão
@@ -93,7 +78,7 @@ app.post('/create-session', async (req, res) => {
       }
     });
 
-    // Evento para garantir que Node não feche prematuramente
+    // Captura mensagens de log e eventos
     client.onStreamChange((stream) => {
       console.log(`🔹 Stream atualizado para sessão ${sessionName}:`, stream);
     });
@@ -102,6 +87,7 @@ app.post('/create-session', async (req, res) => {
   } catch (err) {
     console.error(`❌ Erro ao criar sessão ${sessionName}:`, err);
     res.status(500).json({ error: 'Erro ao criar sessão', details: err.message });
+    io.to(sessionName).emit('error', { message: `Falha ao iniciar sessão: ${err.message}` });
   }
 });
 
@@ -124,6 +110,7 @@ process.on('unhandledRejection', (reason, promise) => {
   console.error('❌ Rejeição não tratada:', reason);
 });
 
+// Inicializa servidor
 server.listen(3000, () => {
   console.log('🌍 Servidor rodando em http://localhost:3000');
 });
