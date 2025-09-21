@@ -1,151 +1,89 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WhatsApp Web - Sessão</title>
-  <style>
-    body {
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      background: linear-gradient(135deg, #4facfe, #00f2fe);
-      color: #333;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: flex-start;
-      min-height: 100vh;
-      padding: 20px;
-    }
-    h1 {
-      color: #fff;
-      margin-bottom: 30px;
-      text-shadow: 2px 2px 8px rgba(0,0,0,0.2);
-    }
-    .input-group {
-      display: flex;
-      flex-direction: row;
-      align-items: center;
-      margin-bottom: 20px;
-    }
-    input#sessionName {
-      padding: 12px 15px;
-      font-size: 16px;
-      border-radius: 8px 0 0 8px;
-      border: none;
-      outline: none;
-      width: 250px;
-      max-width: 70vw;
-    }
-    button {
-      padding: 12px 20px;
-      font-size: 16px;
-      border-radius: 0 8px 8px 0;
-      border: none;
-      background-color: #ffb347;
-      color: #fff;
-      cursor: pointer;
-      transition: background 0.3s;
-      box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-    }
-    button:hover { background-color: #ffcc33; }
-    #status {
-      margin-top: 20px;
-      font-size: 18px;
-      font-weight: bold;
-      color: #fff;
-      text-shadow: 1px 1px 4px rgba(0,0,0,0.3);
-    }
-    #qrContainer {
-      margin-top: 25px;
-      background: #fff;
-      padding: 20px;
-      border-radius: 16px;
-      box-shadow: 0 8px 16px rgba(0,0,0,0.2);
-      display: none;
-      flex-direction: column;
-      align-items: center;
-    }
-    #qrContainer img {
-      max-width: 300px;
-      width: 100%;
-      height: auto;
-      border-radius: 12px;
-      margin-bottom: 10px;
-    }
-    #logs {
-      margin-top: 20px;
-      width: 100%;
-      max-width: 500px;
-      background: rgba(255,255,255,0.9);
-      border-radius: 12px;
-      padding: 15px;
-      box-shadow: 0 6px 12px rgba(0,0,0,0.2);
-      font-size: 14px;
-      line-height: 1.4;
-      max-height: 300px;
-      overflow-y: auto;
-    }
-    .log-line { margin-bottom: 5px; }
-    @media (max-width: 500px) {
-      input#sessionName { width: 60vw; }
-      #qrContainer img { max-width: 200px; }
-    }
-  </style>
-</head>
-<body>
-  <h1>WhatsApp Web - Sessão</h1>
+     const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+const { Client, LocalAuth } = require('whatsapp-web.js');
+const qrcode = require('qrcode');
 
-  <div class="input-group">
-    <input type="text" id="sessionName" placeholder="Digite o nome da sessão">
-    <button id="startBtn">Iniciar Sessão</button>
-  </div>
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server);
 
-  <div id="status">Aguardando ação...</div>
+app.use(express.static('public'));
 
-  <div id="qrContainer">
-    <img id="qrCode" src="" alt="QR Code">
-  </div>
+let clients = {}; // Armazena instâncias por nome de sessão
 
-  <div id="logs"></div>
+io.on('connection', (socket) => {
+    console.log('🔌 Novo cliente conectado');
+    socket.emit('log', '🔌 Conectado ao servidor');
 
-  <script src="/socket.io/socket.io.js"></script>
-  <script>
-    const socket = io();
+    socket.on('start-session', async (sessionName) => {
+        if (!sessionName) {
+            socket.emit('log', '❌ Nome da sessão não pode ser vazio');
+            return;
+        }
 
-    const startBtn = document.getElementById('startBtn');
-    const sessionNameInput = document.getElementById('sessionName');
-    const logsDiv = document.getElementById('logs');
-    const statusDiv = document.getElementById('status');
-    const qrContainer = document.getElementById('qrContainer');
-    const qrCodeImg = document.getElementById('qrCode');
+        socket.emit('log', `🚀 Iniciando sessão: ${sessionName}...`);
 
-    function addLog(msg) {
-      const p = document.createElement('p');
-      p.textContent = msg;
-      p.className = 'log-line';
-      logsDiv.appendChild(p);
-      logsDiv.scrollTop = logsDiv.scrollHeight;
-    }
+        // Evita recriar a sessão se já existir
+        if (clients[sessionName]) {
+            socket.emit('log', `⚠️ Sessão ${sessionName} já existe`);
+            return;
+        }
 
-    startBtn.addEventListener('click', () => {
-      const name = sessionNameInput.value.trim();
-      if (!name) return alert('Digite o nome da sessão!');
-      statusDiv.textContent = `Iniciando sessão: ${name}...`;
-      addLog(`🔧 Solicitando criação da sessão "${name}"...`);
-      socket.emit('start-session', name);
+        // Cria cliente WhatsApp
+        const client = new Client({
+            authStrategy: new LocalAuth({ clientId: sessionName }),
+            puppeteer: {
+                headless: true,
+                args: ['--no-sandbox', '--disable-setuid-sandbox']
+            }
+        });
+
+        clients[sessionName] = client;
+
+        // QR Code
+        client.on('qr', async (qr) => {
+            socket.emit('log', '📷 QR code gerado, aguardando escaneamento...');
+            try {
+                const qrDataUrl = await qrcode.toDataURL(qr);
+                socket.emit('qr', qrDataUrl);
+                socket.emit('log', '📌 QR code enviado para o HTML');
+            } catch (err) {
+                socket.emit('log', '❌ Erro ao gerar QR code: ' + err.message);
+            }
+        });
+
+        // Sessão pronta
+        client.on('ready', () => {
+            socket.emit('log', `✅ Sessão ${sessionName} pronta!`);
+        });
+
+        // Mensagens recebidas
+        client.on('message', (message) => {
+            socket.emit('log', `💬 Mensagem recebida de ${message.from}: ${message.body}`);
+        });
+
+        // Falha de autenticação
+        client.on('auth_failure', (msg) => {
+            socket.emit('log', `❌ Falha de autenticação na sessão ${sessionName}: ${msg}`);
+        });
+
+        // Desconexão
+        client.on('disconnected', (reason) => {
+            socket.emit('log', `❌ Sessão ${sessionName} desconectada: ${reason}`);
+            delete clients[sessionName];
+        });
+
+        // Inicializa
+        try {
+            client.initialize();
+            socket.emit('log', `🔧 Inicializando cliente para sessão ${sessionName}...`);
+        } catch (err) {
+            socket.emit('log', '❌ Erro ao inicializar cliente: ' + err.message);
+        }
     });
+});
 
-    socket.on('log', (msg) => {
-      addLog(msg);
-      statusDiv.textContent = msg;
-    });
-
-    socket.on('qr', (dataUrl) => {
-      qrContainer.style.display = 'flex';
-      qrCodeImg.src = dataUrl;
-      addLog('📷 QR code atualizado');
-    });
-  </script>
-</body>
-</html>
-
+server.listen(3000, () => console.log('🌐 Servidor rodando em http://localhost:3000'));
+Oretirne o qrcode como base64
+Reivie o js completo  
