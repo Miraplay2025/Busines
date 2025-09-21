@@ -2,11 +2,9 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <title>WPPConnect - Criar Sessão e Receber Mensagens</title>
+  <title>WPPConnect - Criar Sessão</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
-    /* Reset e estilo geral */
-    * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
       background: linear-gradient(135deg, #4facfe, #00f2fe);
@@ -18,121 +16,79 @@
       min-height: 100vh;
       padding: 20px;
     }
-    h1 { 
-      color: #fff; 
-      margin-bottom: 30px; 
-      text-shadow: 2px 2px 8px rgba(0,0,0,0.2); 
-      text-align: center;
+    h1 {
+      color: #fff;
+      margin-bottom: 30px;
+      text-shadow: 2px 2px 8px rgba(0,0,0,0.2);
     }
-
-    /* Formulário de sessão */
-    .input-group { 
-      display: flex; 
-      flex-direction: row; 
-      align-items: center; 
-      margin-bottom: 20px; 
-      flex-wrap: wrap;
-      gap: 10px;
+    .input-group {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      margin-bottom: 20px;
     }
-    input#sessionName { 
-      padding: 12px 15px; 
-      font-size: 16px; 
-      border-radius: 8px 0 0 8px; 
-      border: none; 
-      outline: none; 
-      width: 250px; 
-      max-width: 70vw; 
+    input#sessionName {
+      padding: 12px 15px;
+      font-size: 16px;
+      border-radius: 8px 0 0 8px;
+      border: none;
+      outline: none;
+      width: 250px;
+      max-width: 70vw;
     }
-    button { 
-      padding: 12px 20px; 
-      font-size: 16px; 
-      border-radius: 0 8px 8px 0; 
-      border: none; 
-      background-color: #ffb347; 
-      color: #fff; 
-      cursor: pointer; 
-      transition: background 0.3s; 
-      box-shadow: 0 4px 8px rgba(0,0,0,0.2); 
+    button {
+      padding: 12px 20px;
+      font-size: 16px;
+      border-radius: 0 8px 8px 0;
+      border: none;
+      background-color: #ffb347;
+      color: #fff;
+      cursor: pointer;
+      transition: background 0.3s;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.2);
     }
     button:hover { background-color: #ffcc33; }
-
-    /* Status */
-    #status { 
-      margin-top: 20px; 
-      font-size: 18px; 
-      font-weight: bold; 
-      color: #fff; 
-      text-shadow: 1px 1px 4px rgba(0,0,0,0.3); 
-      text-align: center;
+    #status {
+      margin-top: 20px;
+      font-size: 18px;
+      font-weight: bold;
+      color: #fff;
+      text-shadow: 1px 1px 4px rgba(0,0,0,0.3);
     }
-
-    /* QR Code */
-    #qrContainer { 
-      margin-top: 25px; 
-      background: #fff; 
-      padding: 20px; 
-      border-radius: 16px; 
-      box-shadow: 0 8px 16px rgba(0,0,0,0.2); 
-      display: none; 
-      flex-direction: column; 
-      align-items: center; 
-      transition: all 0.3s ease;
-    }
-    #qrContainer img { 
-      max-width: 300px; 
-      width: 100%; 
-      height: auto; 
-      border-radius: 12px; 
-      margin-bottom: 10px; 
-    }
-    #qrName { font-weight: bold; color: #333; text-align: center; }
-
-    /* Mensagens recebidas */
-    #messagesContainer {
+    #qrContainer {
       margin-top: 25px;
+      background: #fff;
+      padding: 20px;
+      border-radius: 16px;
+      box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+    }
+    #qrContainer img {
+      max-width: 300px;
       width: 100%;
-      max-width: 400px;
-      background: rgba(255,255,255,0.9);
+      height: auto;
       border-radius: 12px;
-      padding: 15px;
-      box-shadow: 0 6px 12px rgba(0,0,0,0.2);
-      overflow-y: auto;
-      max-height: 300px;
-    }
-    .message {
-      padding: 8px 12px;
       margin-bottom: 10px;
-      border-radius: 8px;
-      background-color: #e0f7fa;
-      color: #00796b;
-      font-size: 14px;
-      word-wrap: break-word;
     }
-
-    /* Responsividade */
-    @media (max-width: 500px) { 
-      input#sessionName { width: 60vw; } 
-      #qrContainer img { max-width: 200px; } 
-      #messagesContainer { max-width: 90vw; }
+    @media (max-width: 500px) {
+      input#sessionName { width: 60vw; }
+      #qrContainer img { max-width: 200px; }
     }
   </style>
 </head>
 <body>
-  <h1>WPPConnect - Criar Sessão e Receber Mensagens</h1>
-
+  <h1>WPPConnect - Criar Sessão</h1>
   <div class="input-group">
     <input type="text" id="sessionName" placeholder="Nome da Sessão" />
     <button onclick="createSession()">Criar Sessão</button>
   </div>
-
-  <div id="status">Insira o nome da sessão para iniciar</div>
-
+  <div id="status"></div>
   <div id="qrContainer">
     <img id="qrImg" src="" alt="QR Code">
     <div id="qrName"></div>
   </div>
-
-  <div id="messagesContainer"></div>
 
   <script src="/socket.io/socket.io.js"></script>
   <script>
@@ -144,7 +100,6 @@
 
       document.getElementById('status').innerText = 'Iniciando sessão...';
       document.getElementById('qrContainer').style.display = 'none';
-      document.getElementById('messagesContainer').innerHTML = '';
 
       fetch('/create-session', {
         method: 'POST',
@@ -166,45 +121,22 @@
       });
     }
 
-    // Recebe QR Code em tempo real
-    socket.on('qr', ({ qrCode, sessionName }) => {
-      const qrImg = document.getElementById('qrImg');
-      qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(qrCode)}&size=300x300`;
+    // Recebe QR Code em base64
+    socket.on('qr', ({ qrDataUrl, sessionName }) => {
+      document.getElementById('qrImg').src = qrDataUrl;
       document.getElementById('qrName').innerText = `Escaneie o QR Code - ${sessionName}`;
       document.getElementById('qrContainer').style.display = 'flex';
       document.getElementById('status').innerText = '📷 Escaneie o QR Code com seu WhatsApp';
     });
 
-    // Sessão conectada
     socket.on('connected', () => {
       document.getElementById('status').innerText = '✅ Sessão conectada com sucesso!';
       document.getElementById('qrContainer').style.display = 'none';
     });
 
-    // Sessão desconectada
     socket.on('disconnected', () => {
       document.getElementById('status').innerText = '⚠️ Sessão desconectada';
       document.getElementById('qrContainer').style.display = 'none';
-    });
-
-    // Recebe mensagens em tempo real
-    socket.on('message', ({ from, message }) => {
-      const container = document.getElementById('messagesContainer');
-      const div = document.createElement('div');
-      div.classList.add('message');
-      div.innerText = `[${from}]: ${message}`;
-      container.appendChild(div);
-      container.scrollTop = container.scrollHeight;
-    });
-
-    // Status de pareamento
-    socket.on('status', ({ message }) => {
-      document.getElementById('status').innerText = message;
-    });
-
-    // Erros
-    socket.on('error', ({ message }) => {
-      document.getElementById('status').innerText = `⚠️ ${message}`;
     });
   </script>
 </body>
