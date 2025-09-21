@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WhatsApp Bot</title>
+<style>
+    body { font-family: Arial; text-align: center; margin: 20px; }
+    input, button { padding: 10px; margin: 5px; font-size: 16px; }
+    img { max-width: 300px; width: 80%; height: auto; margin: 20px 0; }
+    pre { text-align: left; max-width: 600px; margin: auto; background: #f0f0f0; padding: 10px; border-radius: 5px; overflow-x: auto; }
+</style>
+</head>
+<body>
+<h1>WhatsApp Bot</h1>
+<input type="text" id="sessionName" placeholder="Nome da sessão">
+<button onclick="createSession()">Criar Sessão</button>
+
+<div id="qrContainer"></div>
+<pre id="sessionData"></pre>
+
+<script>
+let interval;
+
+async function createSession() {
+    const sessionName = document.getElementById('sessionName').value.trim();
+    if(!sessionName) return alert('Digite o nome da sessão');
+
+    await fetch('/create-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionName })
+    });
+
+    if(interval) clearInterval(interval);
+    interval = setInterval(() => fetchSession(sessionName), 2000);
+}
+
+async function fetchSession(sessionName) {
+    const res = await fetch(`/session/${sessionName}`);
+    const data = await res.json();
+
+    const qrContainer = document.getElementById('qrContainer');
+    const sessionData = document.getElementById('sessionData');
+
+    if(data.qrImage) {
+        qrContainer.innerHTML = `<img src="${data.qrImage}" alt="QR Code"><p>QR Code gerado. Escaneie com WhatsApp</p>`;
+    } else {
+        qrContainer.innerHTML = '';
+    }
+
+    if(data.connected) {
+        sessionData.textContent = JSON.stringify(data.sessionData, null, 2);
+        clearInterval(interval);
+        alert('Sessão conectada com sucesso!');
+    }
+}
+</script>
+</body>
+</html>
