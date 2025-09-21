@@ -1,12 +1,13 @@
 {
-  "name": "wppconnect-bot",
+  "name": "wppconnect-app",
   "version": "1.0.0",
+  "description": "Servidor WPPConnect para criação de sessões WhatsApp",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
-    "@wppconnect-team/wppconnect": "^2.0.0",
+    "@wppconnect-team/wppconnect": "^1.9.13", 
     "express": "^4.18.2",
     "cors": "^2.8.5"
   }
