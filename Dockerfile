@@ -2,8 +2,13 @@ FROM node:20-slim
 
 WORKDIR /app
 
+# Atualiza npm para evitar warnings
+RUN npm install -g npm@11.6.0
+
 COPY package.json ./
-RUN npm install --production
+
+# Instala dependências de produção
+RUN npm install --omit=dev
 
 COPY . .
 
