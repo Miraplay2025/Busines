@@ -12,7 +12,12 @@ const io = new Server(server);
 
 app.use(cors());
 app.use(express.json());
-app.use(express.static('sessions'));
+
+// Serve arquivos estáticos da pasta "public" (HTML, CSS, JS do frontend)
+app.use(express.static('public'));
+
+// Pasta para armazenar sessões e QR Codes
+app.use('/sessions', express.static(path.join(__dirname, 'sessions')));
 
 const sessions = {};
 
@@ -46,7 +51,7 @@ app.post('/create-session', async (req, res) => {
       qrTimeout: 0,
       puppeteerOptions: {
         headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
       },
     });
 
@@ -63,6 +68,9 @@ app.post('/create-session', async (req, res) => {
 
       const qrPath = `/sessions/${sessionName}/qrcode.png`;
       sessions[sessionName].qrPath = qrPath;
+
+      console.log(`💾 QR Code salvo em: ${qrFile}`);
+      console.log(`🔗 Caminho público: ${qrPath}`);
 
       io.to(sessionName).emit('qr', { qrPath, sessionName });
     });
@@ -84,6 +92,11 @@ app.post('/create-session', async (req, res) => {
     console.error(`❌ Erro ao criar sessão ${sessionName}:`, err);
     res.status(500).json({ error: 'Erro ao criar sessão', details: err.message });
   }
+});
+
+// Rota para acessar a página HTML principal
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // Inicializa servidor
