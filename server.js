@@ -5,6 +5,7 @@ const { Server } = require('socket.io');
 const { create } = require('@wppconnect-team/wppconnect');
 const QRCode = require('qrcode');
 const path = require('path');
+const fs = require('fs');
 
 const app = express();
 const server = http.createServer(app);
@@ -14,7 +15,7 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-const sessions = {};
+const sessions = [];
 const steps = [
   "Iniciando sessão...",
   "Inicializando navegador...",
@@ -25,9 +26,9 @@ const steps = [
   "Aguardando leitura do QR Code..."
 ];
 
-// 🔌 Função de log para enviar ao HTML via Socket.io
+// 🔌 Função de log
 function logStep(sessionName, message, stepIndex = null) {
-  console.log(message);
+  console.log(`[${sessionName}] ${message}`);
   io.to(sessionName).emit('log', {
     message,
     progress: stepIndex !== null ? Math.round(((stepIndex + 1) / steps.length) * 100) : null
@@ -37,7 +38,6 @@ function logStep(sessionName, message, stepIndex = null) {
 // Socket.io
 io.on('connection', (socket) => {
   console.log('🔗 Novo cliente conectado');
-  
   socket.on('joinSession', (sessionName) => {
     socket.join(sessionName);
     console.log(`📡 Cliente entrou na sala da sessão: ${sessionName}`);
@@ -52,18 +52,22 @@ app.post('/create-session', async (req, res) => {
   try {
     logStep(sessionName, `🚀 Criando sessão: ${sessionName}`, 0);
 
+    // Gerar pasta temporária para sessão
+    const sessionDir = path.join('/tmp', `wppconnect-${sessionName}`);
+    if (!fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir, { recursive: true });
+
     const client = await create({
       session: sessionName,
+      sessionDataPath: sessionDir,   // Pasta exclusiva para evitar conflito
       headless: true,
       autoClose: 0,
       qrTimeout: 0,
+      killProcessOnBrowserClose: true, // Fecha navegador anterior
       catchQR: (qrCode, asciiQR, attempt) => {
         logStep(sessionName, `📷 QR Code recebido (tentativa ${attempt})`, 6);
-        QRCode.toDataURL(qrCode)
-          .then((qrDataUrl) => {
-            io.to(sessionName).emit('qr', { qrDataUrl, sessionName });
-          })
-          .catch(err => logStep(sessionName, `❌ Erro ao gerar QR Code: ${err}`));
+        QRCode.toDataURL(qrCode).then(qrDataUrl => {
+          io.to(sessionName).emit('qr', { qrDataUrl, sessionName });
+        }).catch(err => logStep(sessionName, `❌ Erro ao gerar QR Code: ${err}`));
       },
       puppeteerOptions: {
         headless: true,
@@ -73,22 +77,19 @@ app.post('/create-session', async (req, res) => {
           '--disable-dev-shm-usage',
           '--disable-extensions',
           '--disable-gpu'
-        ],
+        ]
       },
       logQR: false,
       disableSpins: true
     });
 
-    sessions[sessionName] = { client, connected: false };
+    sessions.push({ sessionName, client, connected: false });
 
-    // Eventos de estado
-    client.onStateChange((state) => {
+    client.onStateChange(state => {
       logStep(sessionName, `📡 Estado da sessão: ${state}`);
       if (state === 'CONNECTED') {
-        sessions[sessionName].connected = true;
         io.to(sessionName).emit('connected');
       } else if (state === 'DISCONNECTED') {
-        sessions[sessionName].connected = false;
         io.to(sessionName).emit('disconnected');
       }
     });
@@ -105,7 +106,7 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public/index.html'));
 });
 
-// Keep-alive simples para evitar SIGTERM no Render
+// Keep-alive
 setInterval(() => console.log('🟢 Keep-alive'), 60000);
 
 // Inicializar servidor
