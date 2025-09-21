@@ -1,10 +1,9 @@
 const express = require('express');
-const fs = require('fs');
-const path = require('path');
 const cors = require('cors');
 const http = require('http');
 const { Server } = require('socket.io');
 const { create } = require('@wppconnect-team/wppconnect');
+const QRCode = require('qrcode');
 
 const app = express();
 const server = http.createServer(app);
@@ -13,11 +12,10 @@ const io = new Server(server);
 app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
-app.use('/sessions', express.static(path.join(__dirname, 'sessions')));
 
 const sessions = {};
 
-// Socket.io - conexão
+// Socket.io
 io.on('connection', (socket) => {
   console.log('🔗 Novo cliente conectado');
 
@@ -27,7 +25,7 @@ io.on('connection', (socket) => {
   });
 });
 
-// Criação de sessão
+// Criar sessão
 app.post('/create-session', async (req, res) => {
   const { sessionName } = req.body;
   if (!sessionName) return res.status(400).json({ error: 'Nome da sessão é obrigatório' });
@@ -42,26 +40,21 @@ app.post('/create-session', async (req, res) => {
       qrTimeout: 0,
       puppeteerOptions: {
         headless: true,
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-gpu',
-          '--disable-accelerated-2d-canvas',
-          '--no-first-run',
-          '--no-zygote',
-          '--single-process',
-        ],
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
       },
     });
 
-    sessions[sessionName] = { client, connected: false, qrCode: null };
+    sessions[sessionName] = { client, connected: false };
 
-    // Evento QR Code
-    client.onQrCode((qrCode, asciiQR, attempt) => {
+    // QR Code
+    client.onQrCode(async (qrCode, asciiQR, attempt) => {
       console.log(`📷 QR Code recebido (tentativa ${attempt}) para sessão ${sessionName}`);
-      sessions[sessionName].qrCode = qrCode;
-      io.to(sessionName).emit('qr', { qrCode, sessionName });
+      try {
+        const qrDataUrl = await QRCode.toDataURL(qrCode); // Gera base64
+        io.to(sessionName).emit('qr', { qrDataUrl, sessionName });
+      } catch (err) {
+        console.error(`❌ Erro ao gerar QR base64:`, err);
+      }
     });
 
     // Estado da sessão
@@ -73,44 +66,22 @@ app.post('/create-session', async (req, res) => {
       } else if (state === 'DISCONNECTED') {
         sessions[sessionName].connected = false;
         io.to(sessionName).emit('disconnected');
-      } else if (state === 'PAIRING') {
-        io.to(sessionName).emit('status', { message: 'Aguardando pareamento...' });
       }
-    });
-
-    // Captura mensagens de log e eventos
-    client.onStreamChange((stream) => {
-      console.log(`🔹 Stream atualizado para sessão ${sessionName}:`, stream);
     });
 
     res.json({ success: true, message: `Sessão ${sessionName} criada, aguardando QR Code...` });
   } catch (err) {
     console.error(`❌ Erro ao criar sessão ${sessionName}:`, err);
     res.status(500).json({ error: 'Erro ao criar sessão', details: err.message });
-    io.to(sessionName).emit('error', { message: `Falha ao iniciar sessão: ${err.message}` });
   }
 });
 
-// HTML principal
+// Página inicial
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  res.sendFile(__dirname + '/public/index.html');
 });
 
-// Evita encerramento prematuro
-process.on('SIGTERM', () => {
-  console.log('🛑 Recebido SIGTERM, encerrando servidor...');
-  server.close(() => process.exit(0));
-});
-
-process.on('uncaughtException', (err) => {
-  console.error('❌ Exceção não capturada:', err);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('❌ Rejeição não tratada:', reason);
-});
-
-// Inicializa servidor
+// Inicializar servidor
 server.listen(3000, () => {
   console.log('🌍 Servidor rodando em http://localhost:3000');
 });
