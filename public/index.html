@@ -1,121 +1,34 @@
- <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>WhatsApp Web - Sessão</title>
 <style>
-  /* Reset e base */
-  * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     background: linear-gradient(135deg,#4facfe,#00f2fe);
-    color: #333;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    min-height: 100vh;
-    padding: 20px;
+    color:#333;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:flex-start;
+    min-height:100vh;
+    padding:20px;
   }
-  h1 {
-    color: #fff;
-    margin-bottom: 25px;
-    text-shadow: 2px 2px 8px rgba(0,0,0,0.2);
-  }
-
-  /* Input e botão */
-  .input-group {
-    display: flex;
-    margin-bottom: 20px;
-  }
-  input#sessionName {
-    padding: 12px;
-    font-size: 16px;
-    border-radius: 8px 0 0 8px;
-    border: none;
-    outline: none;
-    width: 250px;
-    max-width: 70vw;
-  }
-  button {
-    padding: 12px 20px;
-    font-size: 16px;
-    border-radius: 0 8px 8px 0;
-    border: none;
-    background-color: #ffb347;
-    color: #fff;
-    cursor: pointer;
-    transition: background 0.3s;
-    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-  }
-  button:hover { background-color: #ffcc33; }
-
-  /* Status */
-  #status {
-    margin-top: 10px;
-    font-size: 18px;
-    font-weight: bold;
-    color: #fff;
-    text-shadow: 1px 1px 4px rgba(0,0,0,0.3);
-  }
-
-  /* QR Code */
-  #qrContainer {
-    margin-top: 25px;
-    background: #fff;
-    padding: 20px;
-    border-radius: 16px;
-    display: none;
-    flex-direction: column;
-    align-items: center;
-    box-shadow: 0 8px 16px rgba(0,0,0,0.2);
-  }
-  #qrContainer img {
-    width: 350px;
-    height: 350px;
-    max-width: 90vw;
-    border-radius: 16px;
-    margin-bottom: 10px;
-  }
-  #qrAttempts {
-    font-weight: bold;
-    color: #333;
-  }
-
-  /* Sessão ativa */
-  #sessionData {
-    margin-top: 20px;
-    background: rgba(255,255,255,0.95);
-    padding: 15px;
-    border-radius: 12px;
-    max-width: 450px;
-    width: 100%;
-    text-align: left;
-    box-shadow: 0 6px 12px rgba(0,0,0,0.2);
-    font-size: 14px;
-    line-height: 1.5;
-  }
-
-  /* Logs */
-  #logs {
-    margin-top: 20px;
-    width: 100%;
-    max-width: 500px;
-    background: rgba(255,255,255,0.95);
-    border-radius: 12px;
-    padding: 15px;
-    max-height: 350px;
-    overflow-y: auto;
-    font-size: 14px;
-    line-height: 1.4;
-    box-shadow: 0 6px 12px rgba(0,0,0,0.2);
-  }
-  .log-line { margin-bottom: 5px; }
-
-  @media(max-width:500px){
-    input#sessionName{width:60vw;}
-    #qrContainer img{width:250px;height:250px;}
-  }
+  h1{color:#fff;margin-bottom:20px;text-shadow:2px 2px 8px rgba(0,0,0,0.2);}
+  .input-group{display:flex;margin-bottom:20px;}
+  input#sessionName{padding:12px;font-size:16px;border-radius:8px 0 0 8px;border:none;width:250px;max-width:70vw;}
+  button{padding:12px 20px;font-size:16px;border-radius:0 8px 8px 0;border:none;background:#ffb347;color:#fff;cursor:pointer;transition:background 0.3s;}
+  button:hover{background:#ffcc33;}
+  #status{margin-top:10px;font-size:18px;font-weight:bold;color:#fff;text-shadow:1px 1px 4px rgba(0,0,0,0.3);}
+  #qrContainer{margin-top:20px;background:#fff;padding:20px;border-radius:16px;display:none;flex-direction:column;align-items:center;box-shadow:0 8px 16px rgba(0,0,0,0.2);}
+  #qrContainer canvas{max-width:400px;width:100%;border-radius:12px;margin-bottom:10px;}
+  #qrAttempts{font-weight:bold;margin-top:5px;}
+  #sessionData{margin-top:15px;background:rgba(255,255,255,0.95);padding:12px;border-radius:12px;max-width:600px;width:100%;text-align:left;box-shadow:0 6px 12px rgba(0,0,0,0.2);word-break: break-word;font-size:14px;}
+  #logs{margin-top:20px;width:100%;max-width:600px;background:rgba(255,255,255,0.95);border-radius:12px;padding:15px;max-height:350px;overflow-y:auto;font-size:14px;line-height:1.4;box-shadow:0 6px 12px rgba(0,0,0,0.2);}
+  .log-line{margin-bottom:5px;}
+  @media(max-width:500px){input#sessionName{width:60vw;}#qrContainer canvas{max-width:300px;}}
 </style>
 </head>
 <body>
@@ -130,7 +43,7 @@
 <div id="status">Aguardando ação...</div>
 
 <div id="qrContainer">
-  <img id="qrCode" src="" alt="QR Code">
+  <canvas id="qrCanvas"></canvas>
   <div id="qrAttempts"></div>
 </div>
 
@@ -139,6 +52,7 @@
 <div id="logs"></div>
 
 <script src="/socket.io/socket.io.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
 <script>
 const socket = io();
 
@@ -147,66 +61,63 @@ const sessionNameInput = document.getElementById('sessionName');
 const logsDiv = document.getElementById('logs');
 const statusDiv = document.getElementById('status');
 const qrContainer = document.getElementById('qrContainer');
-const qrCodeImg = document.getElementById('qrCode');
+const qrCanvas = document.getElementById('qrCanvas');
 const qrAttemptsDiv = document.getElementById('qrAttempts');
 const sessionDataDiv = document.getElementById('sessionData');
 
 function addLog(msg){
-  const p=document.createElement('p');
-  p.textContent=msg;
-  p.className='log-line';
-  logsDiv.appendChild(p);
-  logsDiv.scrollTop=logsDiv.scrollHeight;
+    const p=document.createElement('p');
+    p.textContent=msg;
+    p.className='log-line';
+    logsDiv.appendChild(p);
+    logsDiv.scrollTop=logsDiv.scrollHeight;
 }
 
 startBtn.addEventListener('click',()=>{
-  const name=sessionNameInput.value.trim();
-  if(!name)return alert('Digite o nome da sessão!');
-  statusDiv.textContent=`Iniciando sessão: ${name}...`;
-  addLog(`🔧 Solicitando criação da sessão "${name}"...`);
-  socket.emit('start-session',name);
+    const name=sessionNameInput.value.trim();
+    if(!name)return alert('Digite o nome da sessão!');
+    statusDiv.textContent=`Iniciando sessão: ${name}...`;
+    addLog(`🔧 Solicitando criação da sessão "${name}"...`);
+    socket.emit('start-session',name);
 });
 
-// Recebe logs com timestamp e nome da sessão
+// Logs
 socket.on('log',(msg)=>{
-  addLog(msg);
-  statusDiv.textContent=msg;
+    addLog(msg);
+    statusDiv.textContent=msg;
 });
 
-// Recebe QR code (Base64), mostra contagem de tentativas
+// QR raw gerado instantaneamente
 socket.on('qr',(data)=>{
-  qrContainer.style.display='flex';
-  qrCodeImg.src=data.qr;
-  qrAttemptsDiv.textContent=`Tentativa: ${data.attempt}/10`;
-  addLog(`[${data.session}] QR code atualizado (${data.attempt}/10)`);
+    qrContainer.style.display='flex';
+    qrAttemptsDiv.textContent=`Tentativa: ${data.attempt}/10`;
+    QRCode.toCanvas(qrCanvas, data.qr, { width: 400 }, function (error) {
+        if(error) addLog(`❌ Erro ao renderizar QR: ${error}`);
+        else addLog(`[${data.session}] QR code exibido instantaneamente`);
+    });
 });
 
-// Recebe dados da sessão após autenticação
+// Dados da sessão conectada
 socket.on('session-data',(data)=>{
-  const tokens = data.tokens ? `
-    <br><strong>Tokens:</strong>
-    <pre>${JSON.stringify(data.tokens,null,2)}</pre>
-  ` : '';
-  sessionDataDiv.innerHTML=`
-    <strong>📌 Sessão Ativa: ${data.session}</strong><br>
-    Status: ${data.status}<br>
-    Pushname: ${data.pushname||'N/A'}<br>
-    Me: ${JSON.stringify(data.me)||'N/A'}<br>
-    Wid: ${JSON.stringify(data.wid)||'N/A'}
-    ${tokens}
-  `;
-  addLog(`[${data.session}] Sessão conectada com sucesso!`);
-  qrContainer.style.display='none';
+    qrContainer.style.display='none';
+    sessionDataDiv.innerHTML=`
+        <strong>📌 Sessão Ativa: ${data.session}</strong><br>
+        Status: ${data.status}<br>
+        Pushname: ${data.info?.pushname || 'N/A'}<br>
+        Me: ${data.info?.me || 'N/A'}<br>
+        Wid: ${data.info?.wid || 'N/A'}<br>
+        <strong>Tokens:</strong> <pre>${JSON.stringify(data.tokens, null, 2)}</pre>
+    `;
+    addLog(`[${data.session}] Sessão conectada com sucesso!`);
 });
 
-// Recebe fim da sessão
+// Sessão encerrada
 socket.on('session-ended',(data)=>{
-  addLog(`❌ Sessão "${data.session}" finalizada: ${data.reason}`);
-  sessionDataDiv.innerHTML=`<strong>❌ Sessão ${data.session} encerrada</strong>`;
-  qrContainer.style.display='none';
+    addLog(`❌ Sessão "${data.session}" finalizada: ${data.reason}`);
+    sessionDataDiv.innerHTML=`<strong>❌ Sessão ${data.session} encerrada</strong>`;
+    qrContainer.style.display='none';
 });
 </script>
 
 </body>
 </html>
-               
