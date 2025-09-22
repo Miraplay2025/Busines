@@ -1,107 +1,125 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>WhatsApp Web - Sessão</title>
-<style>
-body {
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  background: linear-gradient(135deg,#4facfe,#00f2fe);
-  color:#333;
-  display:flex;
-  flex-direction:column;
-  align-items:center;
-  min-height:100vh;
-  padding:20px;
-}
-h1{color:#fff;margin-bottom:20px;text-shadow:2px 2px 8px rgba(0,0,0,0.2);}
-.input-group{display:flex;margin-bottom:20px;}
-input#sessionName{padding:12px;font-size:16px;border-radius:8px 0 0 8px;border:none;width:250px;}
-button{padding:12px 20px;font-size:16px;border-radius:0 8px 8px 0;border:none;background:#ffb347;color:#fff;cursor:pointer;}
-button:hover{background:#ffcc33;}
-#status{margin-top:10px;font-size:18px;font-weight:bold;color:#fff;text-shadow:1px 1px 4px rgba(0,0,0,0.3);}
-#qrContainer{margin-top:20px;background:#fff;padding:20px;border-radius:16px;display:none;flex-direction:column;align-items:center;}
-#qrContainer img{max-width:300px;width:100%;border-radius:12px;margin-bottom:10px;}
-#sessionData{margin-top:15px;background:rgba(255,255,255,0.9);padding:12px;border-radius:12px;max-width:400px;width:100%;text-align:left;}
-#logs{margin-top:20px;width:100%;max-width:500px;background:rgba(255,255,255,0.9);border-radius:12px;padding:15px;max-height:300px;overflow-y:auto;font-size:14px;line-height:1.4;}
-.log-line{margin-bottom:5px;}
-@media(max-width:500px){input#sessionName{width:60vw;}#qrContainer img{max-width:200px;}}
-</style>
-</head>
-<body>
-<h1>WhatsApp Web - Sessão</h1>
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+const { Client, LocalAuth } = require('whatsapp-web.js');
+const qrcode = require('qrcode');
 
-<div class="input-group">
-  <input type="text" id="sessionName" placeholder="Digite o nome da sessão">
-  <button id="startBtn">Iniciar Sessão</button>
-</div>
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server);
 
-<div id="status">Aguardando ação...</div>
+app.use(express.static('public'));
 
-<div id="qrContainer">
-  <img id="qrCode" src="" alt="QR Code">
-</div>
+let clients = {};      // Armazena instâncias por nome de sessão
+let qrAttempts = {};   // Contador de QR por sessão
 
-<div id="sessionData"></div>
-
-<div id="logs"></div>
-
-<script src="/socket.io/socket.io.js"></script>
-<script>
-const socket = io();
-
-const startBtn = document.getElementById('startBtn');
-const sessionNameInput = document.getElementById('sessionName');
-const logsDiv = document.getElementById('logs');
-const statusDiv = document.getElementById('status');
-const qrContainer = document.getElementById('qrContainer');
-const qrCodeImg = document.getElementById('qrCode');
-const sessionDataDiv = document.getElementById('sessionData');
-
-function addLog(msg){
-    const p=document.createElement('p');
-    p.textContent=msg;
-    p.className='log-line';
-    logsDiv.appendChild(p);
-    logsDiv.scrollTop=logsDiv.scrollHeight;
+// Timestamp
+function getTimestamp() {
+    const now = new Date();
+    const dia = String(now.getDate()).padStart(2, '0');
+    const mes = String(now.getMonth() + 1).padStart(2, '0');
+    const ano = now.getFullYear();
+    const hora = String(now.getHours()).padStart(2, '0');
+    const min = String(now.getMinutes()).padStart(2, '0');
+    const seg = String(now.getSeconds()).padStart(2, '0');
+    return `${dia}/${mes}/${ano} ${hora}:${min}:${seg}`;
 }
 
-startBtn.addEventListener('click',()=>{
-    const name=sessionNameInput.value.trim();
-    if(!name)return alert('Digite o nome da sessão!');
-    statusDiv.textContent=`Iniciando sessão: ${name}...`;
-    addLog(`🔧 Solicitando criação da sessão "${name}"...`);
-    socket.emit('start-session',name);
+// Logs padronizados
+function log(socket, sessionName, msg) {
+    const timestamp = getTimestamp();
+    const formatted = `[${sessionName}] ${timestamp} ➝ ${msg}`;
+    console.log(formatted);
+    socket.emit('log', formatted);
+}
+
+io.on('connection', (socket) => {
+    console.log('🔌 Novo cliente conectado');
+    socket.emit('log', '🔌 Conectado ao servidor');
+
+    socket.on('start-session', async (sessionName) => {
+        if (!sessionName) {
+            socket.emit('log', '❌ Nome da sessão não pode ser vazio');
+            return;
+        }
+
+        // Bloqueia sessões duplicadas
+        if (clients[sessionName]) {
+            log(socket, sessionName, `⚠️ Sessão "${sessionName}" já está em andamento`);
+            return;
+        }
+
+        log(socket, sessionName, `🚀 Iniciando sessão...`);
+
+        const client = new Client({
+            authStrategy: new LocalAuth({ clientId: sessionName }),
+            puppeteer: { headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] }
+        });
+
+        clients[sessionName] = client;
+        qrAttempts[sessionName] = 0;
+
+        client.on('qr', async (qr) => {
+            qrAttempts[sessionName]++;
+            if (qrAttempts[sessionName] > 10) {
+                log(socket, sessionName, `❌ Tentativas de QR excedidas, sessão será excluída`);
+                client.destroy();
+                delete clients[sessionName];
+                delete qrAttempts[sessionName];
+                socket.emit('session-ended', { session: sessionName, reason: 'Tentativas de QR excedidas' });
+                return;
+            }
+
+            log(socket, sessionName, `📷 QR code gerado (${qrAttempts[sessionName]}/10)`);
+            try {
+                const qrBase64 = await qrcode.toDataURL(qr);
+                socket.emit('qr', { session: sessionName, qr: qrBase64, attempt: qrAttempts[sessionName] });
+            } catch (err) {
+                log(socket, sessionName, `❌ Erro ao gerar QR code: ${err.message}`);
+            }
+        });
+
+        client.on('ready', async () => {
+            log(socket, sessionName, `✅ Sessão pronta!`);
+            try {
+                // Envia todos os dados da sessão incluindo tokens
+                const tokenData = await client.getSessionTokenBrowser();
+                const sessionData = {
+                    session: sessionName,
+                    status: 'ready',
+                    info: client.info,
+                    tokens: tokenData
+                };
+                socket.emit('session-data', sessionData);
+                log(socket, sessionName, `📌 Dados completos da sessão enviados ao HTML`);
+            } catch (err) {
+                log(socket, sessionName, `⚠️ Erro ao coletar dados da sessão: ${err.message}`);
+            }
+        });
+
+        client.on('message', (message) => {
+            log(socket, sessionName, `💬 Mensagem recebida de ${message.from}: ${message.body}`);
+        });
+
+        client.on('auth_failure', (msg) => {
+            log(socket, sessionName, `❌ Falha de autenticação: ${msg}`);
+        });
+
+        client.on('disconnected', (reason) => {
+            log(socket, sessionName, `❌ Sessão desconectada: ${reason}`);
+            client.destroy();
+            delete clients[sessionName];
+            delete qrAttempts[sessionName];
+            socket.emit('session-ended', { session: sessionName, reason });
+        });
+
+        try {
+            client.initialize();
+            log(socket, sessionName, `🔧 Inicializando cliente...`);
+        } catch (err) {
+            log(socket, sessionName, `❌ Erro ao inicializar cliente: ${err.message}`);
+        }
+    });
 });
 
-socket.on('log',(msg)=>{
-    addLog(msg);
-    statusDiv.textContent=msg;
-});
-
-socket.on('qr',(data)=>{
-    qrContainer.style.display='flex';
-    qrCodeImg.src=data.qr;
-    addLog(`[${data.session}] QR code atualizado (${data.attempt}/10)`);
-});
-
-socket.on('session-data',(data)=>{
-    sessionDataDiv.innerHTML=`
-        <strong>📌 Sessão Ativa: ${data.session}</strong><br>
-        Status: ${data.status}<br>
-        Pushname: ${data.pushname||'N/A'}<br>
-        Me: ${data.me||'N/A'}<br>
-        Wid: ${data.wid||'N/A'}
-    `;
-    addLog(`[${data.session}] Sessão conectada com sucesso!`);
-});
-
-socket.on('session-ended',(data)=>{
-    addLog(`❌ Sessão "${data.session}" finalizada: ${data.reason}`);
-    sessionDataDiv.innerHTML=`<strong>❌ Sessão ${data.session} encerrada</strong>`;
-    qrContainer.style.display='none';
-});
-</script>
-</body>
-</html>
+server.listen(3000, () => console.log('🌐 Servidor rodando em http://localhost:3000'));
