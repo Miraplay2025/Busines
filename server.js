@@ -11,6 +11,28 @@ const io = new Server(server);
 app.use(express.static('public'));
 
 let clients = {}; // Armazena instâncias por nome de sessão
+let qrAttempts = {}; // Contador de QR por sessão
+let activeSessions = new Set(); // Para impedir sessões simultâneas
+
+// Função util para timestamp
+function getTimestamp() {
+    const now = new Date();
+    const dia = String(now.getDate()).padStart(2, '0');
+    const mes = String(now.getMonth() + 1).padStart(2, '0');
+    const ano = now.getFullYear();
+    const hora = String(now.getHours()).padStart(2, '0');
+    const min = String(now.getMinutes()).padStart(2, '0');
+    const seg = String(now.getSeconds()).padStart(2, '0');
+    return `${dia}/${mes}/${ano} ${hora}:${min}:${seg}`;
+}
+
+// Função util para logs padronizados
+function log(socket, sessionName, msg) {
+    const timestamp = getTimestamp();
+    const formatted = `[${sessionName}] ${timestamp} ➝ ${msg}`;
+    console.log(formatted);
+    socket.emit('log', formatted);
+}
 
 io.on('connection', (socket) => {
     console.log('🔌 Novo cliente conectado');
@@ -22,65 +44,83 @@ io.on('connection', (socket) => {
             return;
         }
 
-        socket.emit('log', `🚀 Iniciando sessão: ${sessionName}...`);
-
-        // Evita recriar a sessão se já existir
-        if (clients[sessionName]) {
-            socket.emit('log', `⚠️ Sessão ${sessionName} já existe`);
+        if (activeSessions.has(sessionName)) {
+            socket.emit('log', `❌ Sessão "${sessionName}" já em andamento!`);
             return;
         }
 
-        // Cria cliente WhatsApp
+        log(socket, sessionName, `🚀 Iniciando sessão...`);
+        activeSessions.add(sessionName);
+
         const client = new Client({
             authStrategy: new LocalAuth({ clientId: sessionName }),
-            puppeteer: {
-                headless: true,
-                args: ['--no-sandbox', '--disable-setuid-sandbox']
-            }
+            puppeteer: { headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] }
         });
 
         clients[sessionName] = client;
+        qrAttempts[sessionName] = 0;
 
-        // QR Code
         client.on('qr', async (qr) => {
-            socket.emit('log', '📷 QR code gerado, aguardando escaneamento...');
+            qrAttempts[sessionName]++;
+            if (qrAttempts[sessionName] > 10) {
+                log(socket, sessionName, `❌ Tentativas de QR excedidas, sessão será excluída`);
+                client.destroy();
+                delete clients[sessionName];
+                delete qrAttempts[sessionName];
+                activeSessions.delete(sessionName);
+                socket.emit('session-ended', { session: sessionName, reason: 'Tentativas de QR excedidas' });
+                return;
+            }
+
+            log(socket, sessionName, `📷 QR code gerado (${qrAttempts[sessionName]}/10)`);
             try {
-                // Retorna QR code em Base64
                 const qrBase64 = await qrcode.toDataURL(qr);
-                socket.emit('qr', qrBase64);
-                socket.emit('log', '📌 QR code enviado para o HTML');
+                socket.emit('qr', { session: sessionName, qr: qrBase64, attempt: qrAttempts[sessionName] });
+                log(socket, sessionName, `📌 QR code enviado ao HTML`);
             } catch (err) {
-                socket.emit('log', '❌ Erro ao gerar QR code: ' + err.message);
+                log(socket, sessionName, `❌ Erro ao gerar QR code: ${err.message}`);
             }
         });
 
-        // Sessão pronta
-        client.on('ready', () => {
-            socket.emit('log', `✅ Sessão ${sessionName} pronta!`);
+        client.on('ready', async () => {
+            log(socket, sessionName, `✅ Sessão pronta!`);
+            try {
+                const sessionData = {
+                    session: sessionName,
+                    status: 'ready',
+                    me: client.info?.me || null,
+                    wid: client.info?.wid || null,
+                    pushname: client.info?.pushname || null
+                };
+                socket.emit('session-data', sessionData);
+            } catch (err) {
+                log(socket, sessionName, `⚠️ Erro ao coletar dados da sessão: ${err.message}`);
+            }
         });
 
-        // Mensagens recebidas
         client.on('message', (message) => {
-            socket.emit('log', `💬 Mensagem recebida de ${message.from}: ${message.body}`);
+            log(socket, sessionName, `💬 Mensagem recebida de ${message.from}: ${message.body}`);
         });
 
-        // Falha de autenticação
         client.on('auth_failure', (msg) => {
-            socket.emit('log', `❌ Falha de autenticação na sessão ${sessionName}: ${msg}`);
+            log(socket, sessionName, `❌ Falha de autenticação: ${msg}`);
         });
 
-        // Desconexão
         client.on('disconnected', (reason) => {
-            socket.emit('log', `❌ Sessão ${sessionName} desconectada: ${reason}`);
+            log(socket, sessionName, `❌ Sessão desconectada: ${reason}`);
+            client.destroy();
             delete clients[sessionName];
+            delete qrAttempts[sessionName];
+            activeSessions.delete(sessionName);
+            socket.emit('session-ended', { session: sessionName, reason });
         });
 
-        // Inicializa
         try {
             client.initialize();
-            socket.emit('log', `🔧 Inicializando cliente para sessão ${sessionName}...`);
+            log(socket, sessionName, `🔧 Inicializando cliente...`);
         } catch (err) {
-            socket.emit('log', '❌ Erro ao inicializar cliente: ' + err.message);
+            log(socket, sessionName, `❌ Erro ao inicializar cliente: ${err.message}`);
+            activeSessions.delete(sessionName);
         }
     });
 });
