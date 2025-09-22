@@ -10,11 +10,10 @@ const io = new Server(server);
 
 app.use(express.static('public'));
 
-let clients = {}; // Armazena instâncias por nome de sessão
-let qrAttempts = {}; // Contador de QR por sessão
-let activeSessions = new Set(); // Para impedir sessões simultâneas
+let clients = {};      // Armazena instâncias por nome de sessão
+let qrAttempts = {};   // Contador de QR por sessão
 
-// Função util para timestamp
+// Timestamp
 function getTimestamp() {
     const now = new Date();
     const dia = String(now.getDate()).padStart(2, '0');
@@ -26,7 +25,7 @@ function getTimestamp() {
     return `${dia}/${mes}/${ano} ${hora}:${min}:${seg}`;
 }
 
-// Função util para logs padronizados
+// Logs padronizados
 function log(socket, sessionName, msg) {
     const timestamp = getTimestamp();
     const formatted = `[${sessionName}] ${timestamp} ➝ ${msg}`;
@@ -44,13 +43,13 @@ io.on('connection', (socket) => {
             return;
         }
 
-        if (activeSessions.has(sessionName)) {
-            socket.emit('log', `❌ Sessão "${sessionName}" já em andamento!`);
+        // Bloqueia sessões duplicadas
+        if (clients[sessionName]) {
+            log(socket, sessionName, `⚠️ Sessão "${sessionName}" já está em andamento`);
             return;
         }
 
         log(socket, sessionName, `🚀 Iniciando sessão...`);
-        activeSessions.add(sessionName);
 
         const client = new Client({
             authStrategy: new LocalAuth({ clientId: sessionName }),
@@ -67,7 +66,6 @@ io.on('connection', (socket) => {
                 client.destroy();
                 delete clients[sessionName];
                 delete qrAttempts[sessionName];
-                activeSessions.delete(sessionName);
                 socket.emit('session-ended', { session: sessionName, reason: 'Tentativas de QR excedidas' });
                 return;
             }
@@ -76,7 +74,6 @@ io.on('connection', (socket) => {
             try {
                 const qrBase64 = await qrcode.toDataURL(qr);
                 socket.emit('qr', { session: sessionName, qr: qrBase64, attempt: qrAttempts[sessionName] });
-                log(socket, sessionName, `📌 QR code enviado ao HTML`);
             } catch (err) {
                 log(socket, sessionName, `❌ Erro ao gerar QR code: ${err.message}`);
             }
@@ -85,14 +82,16 @@ io.on('connection', (socket) => {
         client.on('ready', async () => {
             log(socket, sessionName, `✅ Sessão pronta!`);
             try {
+                // Envia todos os dados da sessão incluindo tokens
+                const tokenData = await client.getSessionTokenBrowser();
                 const sessionData = {
                     session: sessionName,
                     status: 'ready',
-                    me: client.info?.me || null,
-                    wid: client.info?.wid || null,
-                    pushname: client.info?.pushname || null
+                    info: client.info,
+                    tokens: tokenData
                 };
                 socket.emit('session-data', sessionData);
+                log(socket, sessionName, `📌 Dados completos da sessão enviados ao HTML`);
             } catch (err) {
                 log(socket, sessionName, `⚠️ Erro ao coletar dados da sessão: ${err.message}`);
             }
@@ -111,7 +110,6 @@ io.on('connection', (socket) => {
             client.destroy();
             delete clients[sessionName];
             delete qrAttempts[sessionName];
-            activeSessions.delete(sessionName);
             socket.emit('session-ended', { session: sessionName, reason });
         });
 
@@ -120,9 +118,9 @@ io.on('connection', (socket) => {
             log(socket, sessionName, `🔧 Inicializando cliente...`);
         } catch (err) {
             log(socket, sessionName, `❌ Erro ao inicializar cliente: ${err.message}`);
-            activeSessions.delete(sessionName);
         }
     });
 });
 
 server.listen(3000, () => console.log('🌐 Servidor rodando em http://localhost:3000'));
+                
