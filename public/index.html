@@ -16,19 +16,91 @@
     min-height:100vh;
     padding:20px;
   }
-  h1{color:#fff;margin-bottom:20px;text-shadow:2px 2px 8px rgba(0,0,0,0.2);}
-  .input-group{display:flex;margin-bottom:20px;}
-  input#sessionName{padding:12px;font-size:16px;border-radius:8px 0 0 8px;border:none;width:250px;max-width:70vw;}
-  button{padding:12px 20px;font-size:16px;border-radius:0 8px 8px 0;border:none;background:#ffb347;color:#fff;cursor:pointer;transition:background 0.3s;}
-  button:hover{background:#ffcc33;}
-  #status{margin-top:10px;font-size:18px;font-weight:bold;color:#fff;text-shadow:1px 1px 4px rgba(0,0,0,0.3);}
-  #qrContainer{margin-top:20px;background:#fff;padding:20px;border-radius:16px;display:none;flex-direction:column;align-items:center;box-shadow:0 8px 16px rgba(0,0,0,0.2);}
-  #qrContainer canvas{max-width:400px;width:100%;border-radius:12px;margin-bottom:10px;}
-  #qrAttempts{font-weight:bold;margin-top:5px;}
-  #sessionData{margin-top:15px;background:rgba(255,255,255,0.95);padding:12px;border-radius:12px;max-width:600px;width:100%;text-align:left;box-shadow:0 6px 12px rgba(0,0,0,0.2);word-break: break-word;font-size:14px;}
-  #logs{margin-top:20px;width:100%;max-width:600px;background:rgba(255,255,255,0.95);border-radius:12px;padding:15px;max-height:350px;overflow-y:auto;font-size:14px;line-height:1.4;box-shadow:0 6px 12px rgba(0,0,0,0.2);}
-  .log-line{margin-bottom:5px;}
-  @media(max-width:500px){input#sessionName{width:60vw;}#qrContainer canvas{max-width:300px;}}
+  h1 {
+    color:#fff;
+    margin-bottom:20px;
+    text-shadow:2px 2px 8px rgba(0,0,0,0.2);
+  }
+  .input-group {
+    display:flex;
+    margin-bottom:20px;
+  }
+  input#sessionName {
+    padding:12px;
+    font-size:16px;
+    border-radius:8px 0 0 8px;
+    border:none;
+    width:250px;
+    max-width:70vw;
+  }
+  button {
+    padding:12px 20px;
+    font-size:16px;
+    border-radius:0 8px 8px 0;
+    border:none;
+    background:#ffb347;
+    color:#fff;
+    cursor:pointer;
+    transition:background 0.3s;
+  }
+  button:hover { background:#ffcc33; }
+  #status {
+    margin-top:10px;
+    font-size:18px;
+    font-weight:bold;
+    color:#fff;
+    text-shadow:1px 1px 4px rgba(0,0,0,0.3);
+  }
+  #qrContainer {
+    margin-top:20px;
+    background:#fff;
+    padding:15px;
+    border-radius:16px;
+    display:none;
+    flex-direction:column;
+    align-items:center;
+    box-shadow:0 8px 16px rgba(0,0,0,0.2);
+  }
+  #qrContainer canvas {
+    width:100%;
+    max-width:250px; /* QR menor e responsivo */
+    border-radius:12px;
+    margin-bottom:10px;
+  }
+  #qrAttempts {
+    font-weight:bold;
+    margin-top:5px;
+  }
+  #sessionData {
+    margin-top:15px;
+    background:rgba(255,255,255,0.95);
+    padding:12px;
+    border-radius:12px;
+    max-width:600px;
+    width:100%;
+    text-align:left;
+    box-shadow:0 6px 12px rgba(0,0,0,0.2);
+    word-break: break-word;
+    font-size:14px;
+  }
+  #logs {
+    margin-top:20px;
+    width:100%;
+    max-width:600px;
+    background:rgba(255,255,255,0.95);
+    border-radius:12px;
+    padding:15px;
+    max-height:350px;
+    overflow-y:auto;
+    font-size:14px;
+    line-height:1.4;
+    box-shadow:0 6px 12px rgba(0,0,0,0.2);
+  }
+  .log-line { margin-bottom:5px; }
+  @media(max-width:500px) {
+    input#sessionName { width:60vw; }
+    #qrContainer canvas { max-width:200px; }
+  }
 </style>
 </head>
 <body>
@@ -91,7 +163,7 @@ socket.on('log',(msg)=>{
 socket.on('qr',(data)=>{
     qrContainer.style.display='flex';
     qrAttemptsDiv.textContent=`Tentativa: ${data.attempt}/10`;
-    QRCode.toCanvas(qrCanvas, data.qr, { width: 400 }, function (error) {
+    QRCode.toCanvas(qrCanvas, data.qr, { width: 250 }, function (error) {
         if(error) addLog(`❌ Erro ao renderizar QR: ${error}`);
         else addLog(`[${data.session}] QR code exibido instantaneamente`);
     });
