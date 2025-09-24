@@ -5,11 +5,18 @@ const { Server } = require('socket.io');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const fs = require('fs');
 const path = require('path');
+const cors = require('cors');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, {
+    cors: {
+        origin: '*', // Permite acesso de qualquer origem
+        methods: ['GET','POST']
+    }
+});
 
+app.use(cors()); // Habilita CORS
 app.use(express.static('public'));
 
 let clients = {};      // instâncias por nome de sessão
@@ -28,12 +35,14 @@ function getTimestamp() {
     return `${dia}/${mes}/${ano} ${hora}:${min}:${seg}`;
 }
 
+// Função de log isolada por sessão
 function log(socket, sessionName, msg) {
     const formatted = `[${sessionName}] ${getTimestamp()} ➝ ${msg}`;
     console.log(formatted);
     if(socket) socket.emit('log', formatted);
 }
 
+// Salva sessão em disco
 function saveSessionData(sessionName) {
     try {
         const authDir = path.join(__dirname, '.wwebjs_auth', sessionName);
@@ -59,6 +68,7 @@ function saveSessionData(sessionName) {
     }
 }
 
+// Carrega sessão salva em JSON
 function loadSavedSession(sessionName){
     const baseDir = path.join(__dirname, 'conectado', sessionName);
     const result = {};
@@ -94,6 +104,7 @@ function loadSavedSession(sessionName){
     return result;
 }
 
+// Inicializa sessão WhatsApp isolada
 function startSession(socket, sessionName){
     if(clients[sessionName]){
         log(socket, sessionName, `⚠️ Sessão "${sessionName}" já em andamento`);
@@ -101,6 +112,7 @@ function startSession(socket, sessionName){
     }
 
     log(socket, sessionName, `🚀 Iniciando sessão...`);
+    qrAttempts[sessionName] = 0;
 
     const client = new Client({
         authStrategy: new LocalAuth({ clientId: sessionName }),
@@ -108,9 +120,7 @@ function startSession(socket, sessionName){
     });
 
     clients[sessionName] = client;
-    qrAttempts[sessionName] = 0;
-
-    let qrInterval; // para controle de encerramento após 15 tentativas
+    let qrInterval;
 
     client.on('qr', qr => {
         qrAttempts[sessionName]++;
@@ -120,11 +130,7 @@ function startSession(socket, sessionName){
         if(qrAttempts[sessionName] >= 15){
             log(socket, sessionName, `❌ Limite de 15 tentativas de QR atingido. Encerrando sessão.`);
             socket.emit('session-ended', { session: sessionName, reason:'Limite de QR atingido' });
-            if(clients[sessionName]){
-                try { clients[sessionName].destroy(); } catch {}
-                delete clients[sessionName];
-            }
-            clearInterval(qrInterval);
+            safelyDestroySession(sessionName, socket);
         }
     });
 
@@ -153,31 +159,41 @@ function startSession(socket, sessionName){
     client.on('disconnected', reason=>{
         log(socket, sessionName, `❌ Sessão desconectada: ${reason}`);
         socket.emit('session-ended',{ session: sessionName, reason });
-        if(clients[sessionName]){
-            try { clients[sessionName].destroy(); } catch {}
-            delete clients[sessionName];
-        }
-        clearInterval(qrInterval);
+        safelyDestroySession(sessionName, socket);
     });
 
     try {
         client.initialize();
         log(socket, sessionName, `🔧 Cliente inicializado com sucesso`);
-        // Timer seguro apenas para garantir que após 15 tentativas sem QR a sessão será encerrada
+
+        // Garante encerramento automático após 15 tentativas sem QR
         qrInterval = setInterval(()=>{
-            if(qrAttempts[sessionName] >= 15 && clients[sessionName]){
-                try { clients[sessionName].destroy(); } catch {}
-                delete clients[sessionName];
-                log(socket, sessionName, `🛑 Sessão encerrada automaticamente após 15 tentativas de QR`);
+            if(qrAttempts[sessionName] >= 15){
+                safelyDestroySession(sessionName, socket);
                 clearInterval(qrInterval);
             }
         }, 5000);
+
     } catch(err){
         log(socket, sessionName, `❌ Erro ao inicializar cliente: ${err.message}`);
     }
 }
 
-// Endpoint para listar todas as sessões conectadas e seus dados
+// Função segura para destruir sessão sem afetar outras
+function safelyDestroySession(sessionName, socket){
+    try {
+        if(clients[sessionName]){
+            clients[sessionName].destroy();
+            delete clients[sessionName];
+        }
+        qrAttempts[sessionName] = 0;
+        log(socket, sessionName, `🛑 Sessão encerrada de forma segura`);
+    } catch(e){
+        console.error(`Erro ao encerrar sessão ${sessionName}:`, e.message);
+    }
+}
+
+// Endpoint para listar sessões
 app.get('/sessions', (req,res)=>{
     const sessionsDir = path.join(__dirname,'conectado');
     let result = {};
@@ -191,6 +207,7 @@ app.get('/sessions', (req,res)=>{
     res.json(result);
 });
 
+// Socket.io
 io.on('connection', socket=>{
     socket.on('start-session', sessionName=>{
         if(!sessionName || typeof sessionName !== 'string' || sessionName.trim().length===0){
@@ -203,4 +220,3 @@ io.on('connection', socket=>{
 
 const PORT=3000;
 server.listen(PORT, ()=>console.log(`🌐 Servidor rodando em http://localhost:${PORT}`));
-
