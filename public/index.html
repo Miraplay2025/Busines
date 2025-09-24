@@ -63,7 +63,7 @@
   }
   #qrContainer canvas {
     width:100%;
-    max-width:250px; /* QR menor e responsivo */
+    max-width:250px; 
     border-radius:12px;
     margin-bottom:10px;
   }
@@ -138,41 +138,42 @@ const qrAttemptsDiv = document.getElementById('qrAttempts');
 const sessionDataDiv = document.getElementById('sessionData');
 
 function addLog(msg){
-    const p=document.createElement('p');
-    p.textContent=msg;
+    const p = document.createElement('p');
+    p.textContent = msg;
     p.className='log-line';
     logsDiv.appendChild(p);
-    logsDiv.scrollTop=logsDiv.scrollHeight;
+    logsDiv.scrollTop = logsDiv.scrollHeight;
 }
 
 startBtn.addEventListener('click',()=>{
-    const name=sessionNameInput.value.trim();
-    if(!name)return alert('Digite o nome da sessão!');
-    statusDiv.textContent=`Iniciando sessão: ${name}...`;
+    const name = sessionNameInput.value.trim();
+    if(!name) return alert('Digite o nome da sessão!');
+    statusDiv.textContent = `Iniciando sessão: ${name}...`;
     addLog(`🔧 Solicitando criação da sessão "${name}"...`);
-    socket.emit('start-session',name);
+    socket.emit('start-session', name);
 });
 
-// Logs
-socket.on('log',(msg)=>{
+// Recebe logs do servidor
+socket.on('log', msg => {
     addLog(msg);
-    statusDiv.textContent=msg;
+    statusDiv.textContent = msg;
 });
 
-// QR raw gerado instantaneamente
-socket.on('qr',(data)=>{
-    qrContainer.style.display='flex';
-    qrAttemptsDiv.textContent=`Tentativa: ${data.attempt}/10`;
+// Recebe QR Code para escanear
+socket.on('qr', data => {
+    qrContainer.style.display = 'flex';
+    qrAttemptsDiv.textContent = `Tentativa: ${data.attempt}/15`;
     QRCode.toCanvas(qrCanvas, data.qr, { width: 250 }, function (error) {
         if(error) addLog(`❌ Erro ao renderizar QR: ${error}`);
-        else addLog(`[${data.session}] QR code exibido instantaneamente`);
+        else addLog(`[${data.session}] QR code exibido`);
     });
+    statusDiv.textContent = `📷 Escaneie o QR code (${data.attempt}/15)`;
 });
 
-// Dados da sessão conectada
-socket.on('session-data',(data)=>{
-    qrContainer.style.display='none';
-    sessionDataDiv.innerHTML=`
+// Recebe dados da sessão conectada
+socket.on('session-data', data => {
+    qrContainer.style.display = 'none';
+    sessionDataDiv.innerHTML = `
         <strong>📌 Sessão Ativa: ${data.session}</strong><br>
         Status: ${data.status}<br>
         Pushname: ${data.info?.pushname || 'N/A'}<br>
@@ -181,15 +182,18 @@ socket.on('session-data',(data)=>{
         <strong>Tokens:</strong> <pre>${JSON.stringify(data.tokens, null, 2)}</pre>
     `;
     addLog(`[${data.session}] Sessão conectada com sucesso!`);
+    statusDiv.textContent = `✅ Sessão "${data.session}" conectada`;
 });
 
 // Sessão encerrada
-socket.on('session-ended',(data)=>{
+socket.on('session-ended', data => {
     addLog(`❌ Sessão "${data.session}" finalizada: ${data.reason}`);
-    sessionDataDiv.innerHTML=`<strong>❌ Sessão ${data.session} encerrada</strong>`;
+    sessionDataDiv.innerHTML = `<strong>❌ Sessão ${data.session} encerrada</strong>`;
     qrContainer.style.display='none';
+    statusDiv.textContent = `❌ Sessão "${data.session}" encerrada`;
 });
 </script>
 
 </body>
 </html>
+        
