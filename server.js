@@ -31,72 +31,73 @@ function getTimestamp() {
 function log(socket, sessionName, msg) {
     const formatted = `[${sessionName}] ${getTimestamp()} ➝ ${msg}`;
     console.log(formatted);
-    if (socket) socket.emit('log', formatted);
+    if(socket) socket.emit('log', formatted);
 }
 
 // Salva dados JSON/arquivos da sessão em pasta específica
 function saveSessionData(sessionName) {
-    const authDir = path.join(__dirname, '.wwebjs_auth', sessionName);
-    const targetDir = path.join(__dirname, 'conectado', sessionName);
+    try {
+        const authDir = path.join(__dirname, '.wwebjs_auth', sessionName);
+        const targetDir = path.join(__dirname, 'conectado', sessionName);
+        if(!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
 
-    if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+        function copyRecursively(srcDir, destDir){
+            fs.readdirSync(srcDir, { withFileTypes: true }).forEach(entry=>{
+                const srcPath = path.join(srcDir, entry.name);
+                const destPath = path.join(destDir, entry.name);
+                if(entry.isDirectory()){
+                    if(!fs.existsSync(destPath)) fs.mkdirSync(destPath);
+                    copyRecursively(srcPath, destPath);
+                } else {
+                    fs.copyFileSync(srcPath, destPath);
+                }
+            });
+        }
 
-    function copyRecursively(srcDir, destDir) {
-        fs.readdirSync(srcDir, { withFileTypes: true }).forEach(entry => {
-            const srcPath = path.join(srcDir, entry.name);
-            const destPath = path.join(destDir, entry.name);
-            if (entry.isDirectory()) {
-                if (!fs.existsSync(destPath)) fs.mkdirSync(destPath);
-                copyRecursively(srcPath, destPath);
-            } else {
-                fs.copyFileSync(srcPath, destPath);
-            }
-        });
-    }
-
-    if (fs.existsSync(authDir)) {
-        copyRecursively(authDir, targetDir);
+        if(fs.existsSync(authDir)) copyRecursively(authDir, targetDir);
+    } catch(e){
+        console.error(`Erro ao salvar sessão "${sessionName}":`, e.message);
     }
 }
 
 // Lê todos os arquivos da pasta "conectado/<sessionName>" em JSON estruturado
-function loadSavedSession(sessionName) {
+function loadSavedSession(sessionName){
     const baseDir = path.join(__dirname, 'conectado', sessionName);
     const result = {};
 
-    function readDirRec(dir, obj) {
-        fs.readdirSync(dir, { withFileTypes: true }).forEach(entry => {
+    function readDirRec(dir, obj){
+        fs.readdirSync(dir, { withFileTypes: true }).forEach(entry=>{
             const p = path.join(dir, entry.name);
             const rel = path.relative(baseDir, p);
-            if (entry.isDirectory()) {
+            if(entry.isDirectory()){
                 obj[rel] = {};
                 readDirRec(p, obj[rel]);
             } else {
                 try {
                     const ext = path.extname(entry.name).toLowerCase();
-                    if (ext === '.json') {
-                        obj[rel] = JSON.parse(fs.readFileSync(p, 'utf8'));
+                    if(ext === '.json'){
+                        obj[rel] = JSON.parse(fs.readFileSync(p,'utf8'));
                     } else {
                         const stat = fs.statSync(p);
-                        if (stat.size < 2000) {
-                            obj[rel] = fs.readFileSync(p, 'utf8');
+                        if(stat.size < 2000){
+                            obj[rel] = fs.readFileSync(p,'utf8');
                         } else {
                             obj[rel] = `⚠️ Arquivo binário/maior omitido (${stat.size} bytes)`;
                         }
                     }
-                } catch (err) {
+                } catch(err){
                     obj[rel] = `⚠️ Erro leitura: ${err.message}`;
                 }
             }
         });
     }
 
-    if (fs.existsSync(baseDir)) readDirRec(baseDir, result);
+    if(fs.existsSync(baseDir)) readDirRec(baseDir, result);
     return result;
 }
 
-function startSession(socket, sessionName) {
-    if (clients[sessionName]) {
+function startSession(socket, sessionName){
+    if(clients[sessionName]){
         log(socket, sessionName, `⚠️ Sessão "${sessionName}" já em andamento`);
         return;
     }
@@ -113,74 +114,63 @@ function startSession(socket, sessionName) {
 
     client.on('qr', qr => {
         qrAttempts[sessionName]++;
-        if (qrAttempts[sessionName] > 15) {
+        if(qrAttempts[sessionName] > 15){
             log(socket, sessionName, `❌ Tentativas de QR excedidas`);
-            client.destroy();
-            delete clients[sessionName];
-            delete qrAttempts[sessionName];
-            socket.emit('session-ended', { session: sessionName, reason: 'Tentativas de QR excedidas' });
+            socket.emit('session-ended',{ session: sessionName, reason:'Tentativas de QR excedidas' });
             return;
         }
         socket.emit('qr', { session: sessionName, qr, attempt: qrAttempts[sessionName] });
         log(socket, sessionName, `📷 QR recebido (tentativa ${qrAttempts[sessionName]})`);
     });
 
-    client.on('ready', async () => {
+    client.on('ready', ()=>{
         log(socket, sessionName, `✅ Sessão pronta!`);
-
-        // Salva os dados da sessão na pasta "conectado/<sessionName>"
         saveSessionData(sessionName);
-
-        // Lê todos os arquivos salvos e envia ao HTML
         const savedData = loadSavedSession(sessionName);
-        socket.emit('session-data', {
+        socket.emit('session-data',{
             session: sessionName,
-            status: 'ready',
-            info: client.info,   // info do WhatsApp
-            tokens: savedData    // todos os arquivos JSON que mantêm a sessão persistente
+            status:'ready',
+            info: client.info,
+            tokens: savedData
         });
-
         log(socket, sessionName, `📌 Dados da sessão salvos e enviados ao cliente`);
     });
 
-    client.on('message', message => {
+    client.on('message', message=>{
         log(socket, sessionName, `💬 ${message.from}: ${message.body}`);
-        socket.emit('message', { session: sessionName, message });
+        socket.emit('message',{ session: sessionName, message });
     });
 
-    client.on('auth_failure', msg => {
+    client.on('auth_failure', msg=>{
         log(socket, sessionName, `❌ Falha de autenticação: ${msg}`);
     });
 
-    client.on('disconnected', reason => {
+    client.on('disconnected', reason=>{
         log(socket, sessionName, `❌ Sessão desconectada: ${reason}`);
-        try { client.destroy(); } catch {}
-        delete clients[sessionName];
-        delete qrAttempts[sessionName];
-        socket.emit('session-ended', { session: sessionName, reason });
+        socket.emit('session-ended',{ session: sessionName, reason });
     });
 
-    setImmediate(() => {
-        try {
-            client.initialize();
-            log(socket, sessionName, `🔧 Inicializando cliente...`);
-        } catch (err) {
-            log(socket, sessionName, `❌ Erro ao inicializar cliente: ${err.message}`);
-        }
-    });
+    // Inicializa o cliente e mantém a sessão persistente
+    try {
+        client.initialize();
+        log(socket, sessionName, `🔧 Cliente inicializado com sucesso`);
+    } catch(err){
+        log(socket, sessionName, `❌ Erro ao inicializar cliente: ${err.message}`);
+    }
 }
 
-io.on('connection', socket => {
-    // Não enviamos log de conexão geral
-    socket.on('start-session', sessionName => {
-        if (!sessionName || typeof sessionName !== 'string' || sessionName.trim().length === 0) {
-            socket.emit('log', '❌ Nome da sessão não pode ser vazio');
+io.on('connection', socket=>{
+    // Apenas eventos de sessão
+    socket.on('start-session', sessionName=>{
+        if(!sessionName || typeof sessionName !== 'string' || sessionName.trim().length===0){
+            socket.emit('log','❌ Nome da sessão não pode ser vazio');
             return;
         }
         startSession(socket, sessionName.trim());
     });
 });
 
-const PORT = 3000;
-server.listen(PORT, () => console.log(`🌐 Servidor rodando em http://localhost:${PORT}`));
-                    
+const PORT=3000;
+server.listen(PORT, ()=>console.log(`🌐 Servidor rodando em http://localhost:${PORT}`));
+                
+    
