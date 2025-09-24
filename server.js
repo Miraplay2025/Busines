@@ -133,7 +133,12 @@ function startSession(socket, sessionName) {
 
         // Lê todos os arquivos salvos e envia ao HTML
         const savedData = loadSavedSession(sessionName);
-        socket.emit('session-data', { session: sessionName, status: 'ready', info: client.info, tokens: savedData });
+        socket.emit('session-data', {
+            session: sessionName,
+            status: 'ready',
+            info: client.info,   // info do WhatsApp
+            tokens: savedData    // todos os arquivos JSON que mantêm a sessão persistente
+        });
 
         log(socket, sessionName, `📌 Dados da sessão salvos e enviados ao cliente`);
     });
@@ -166,9 +171,7 @@ function startSession(socket, sessionName) {
 }
 
 io.on('connection', socket => {
-    console.log('🔌 Novo cliente conectado');
-    socket.emit('log', '🔌 Conectado ao servidor');
-
+    // Não enviamos log de conexão geral
     socket.on('start-session', sessionName => {
         if (!sessionName || typeof sessionName !== 'string' || sessionName.trim().length === 0) {
             socket.emit('log', '❌ Nome da sessão não pode ser vazio');
@@ -180,5 +183,4 @@ io.on('connection', socket => {
 
 const PORT = 3000;
 server.listen(PORT, () => console.log(`🌐 Servidor rodando em http://localhost:${PORT}`));
-      
-  
+                    
