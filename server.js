@@ -110,10 +110,22 @@ function startSession(socket, sessionName){
     clients[sessionName] = client;
     qrAttempts[sessionName] = 0;
 
+    let qrInterval; // para controle de encerramento após 15 tentativas
+
     client.on('qr', qr => {
         qrAttempts[sessionName]++;
         socket.emit('qr', { session: sessionName, qr, attempt: qrAttempts[sessionName] });
         log(socket, sessionName, `📷 QR atualizado (tentativa ${qrAttempts[sessionName]})`);
+
+        if(qrAttempts[sessionName] >= 15){
+            log(socket, sessionName, `❌ Limite de 15 tentativas de QR atingido. Encerrando sessão.`);
+            socket.emit('session-ended', { session: sessionName, reason:'Limite de QR atingido' });
+            if(clients[sessionName]){
+                try { clients[sessionName].destroy(); } catch {}
+                delete clients[sessionName];
+            }
+            clearInterval(qrInterval);
+        }
     });
 
     client.on('ready', ()=>{
@@ -141,11 +153,25 @@ function startSession(socket, sessionName){
     client.on('disconnected', reason=>{
         log(socket, sessionName, `❌ Sessão desconectada: ${reason}`);
         socket.emit('session-ended',{ session: sessionName, reason });
+        if(clients[sessionName]){
+            try { clients[sessionName].destroy(); } catch {}
+            delete clients[sessionName];
+        }
+        clearInterval(qrInterval);
     });
 
     try {
         client.initialize();
         log(socket, sessionName, `🔧 Cliente inicializado com sucesso`);
+        // Timer seguro apenas para garantir que após 15 tentativas sem QR a sessão será encerrada
+        qrInterval = setInterval(()=>{
+            if(qrAttempts[sessionName] >= 15 && clients[sessionName]){
+                try { clients[sessionName].destroy(); } catch {}
+                delete clients[sessionName];
+                log(socket, sessionName, `🛑 Sessão encerrada automaticamente após 15 tentativas de QR`);
+                clearInterval(qrInterval);
+            }
+        }, 5000);
     } catch(err){
         log(socket, sessionName, `❌ Erro ao inicializar cliente: ${err.message}`);
     }
@@ -177,4 +203,4 @@ io.on('connection', socket=>{
 
 const PORT=3000;
 server.listen(PORT, ()=>console.log(`🌐 Servidor rodando em http://localhost:${PORT}`));
-                
+
