@@ -34,7 +34,6 @@ function log(socket, sessionName, msg) {
     if(socket) socket.emit('log', formatted);
 }
 
-// Salva dados JSON/arquivos da sessão em pasta específica
 function saveSessionData(sessionName) {
     try {
         const authDir = path.join(__dirname, '.wwebjs_auth', sessionName);
@@ -60,7 +59,6 @@ function saveSessionData(sessionName) {
     }
 }
 
-// Lê todos os arquivos da pasta "conectado/<sessionName>" em JSON estruturado
 function loadSavedSession(sessionName){
     const baseDir = path.join(__dirname, 'conectado', sessionName);
     const result = {};
@@ -114,13 +112,8 @@ function startSession(socket, sessionName){
 
     client.on('qr', qr => {
         qrAttempts[sessionName]++;
-        if(qrAttempts[sessionName] > 15){
-            log(socket, sessionName, `❌ Tentativas de QR excedidas`);
-            socket.emit('session-ended',{ session: sessionName, reason:'Tentativas de QR excedidas' });
-            return;
-        }
         socket.emit('qr', { session: sessionName, qr, attempt: qrAttempts[sessionName] });
-        log(socket, sessionName, `📷 QR recebido (tentativa ${qrAttempts[sessionName]})`);
+        log(socket, sessionName, `📷 QR atualizado (tentativa ${qrAttempts[sessionName]})`);
     });
 
     client.on('ready', ()=>{
@@ -150,7 +143,6 @@ function startSession(socket, sessionName){
         socket.emit('session-ended',{ session: sessionName, reason });
     });
 
-    // Inicializa o cliente e mantém a sessão persistente
     try {
         client.initialize();
         log(socket, sessionName, `🔧 Cliente inicializado com sucesso`);
@@ -159,8 +151,21 @@ function startSession(socket, sessionName){
     }
 }
 
+// Endpoint para listar todas as sessões conectadas e seus dados
+app.get('/sessions', (req,res)=>{
+    const sessionsDir = path.join(__dirname,'conectado');
+    let result = {};
+    if(fs.existsSync(sessionsDir)){
+        fs.readdirSync(sessionsDir,{withFileTypes:true}).forEach(dir=>{
+            if(dir.isDirectory()){
+                result[dir.name] = loadSavedSession(dir.name);
+            }
+        });
+    }
+    res.json(result);
+});
+
 io.on('connection', socket=>{
-    // Apenas eventos de sessão
     socket.on('start-session', sessionName=>{
         if(!sessionName || typeof sessionName !== 'string' || sessionName.trim().length===0){
             socket.emit('log','❌ Nome da sessão não pode ser vazio');
@@ -173,4 +178,3 @@ io.on('connection', socket=>{
 const PORT=3000;
 server.listen(PORT, ()=>console.log(`🌐 Servidor rodando em http://localhost:${PORT}`));
                 
-    
