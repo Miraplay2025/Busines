@@ -19,6 +19,7 @@ app.use(express.static('public'));
 
 const clients = {};
 const qrAttempts = {};
+const sessionState = {}; // controla estado real da sessão
 
 function log(socket, session, msg) {
   const text = `[${session}] ${msg}`;
@@ -27,12 +28,11 @@ function log(socket, session, msg) {
 }
 
 /* =========================
-   COPIAR PASTA RECURSIVA
+   COPY DIR
 ========================= */
 async function copyDir(src, dest) {
   await fsp.mkdir(dest, { recursive: true });
   const entries = await fsp.readdir(src, { withFileTypes: true });
-
   for (const e of entries) {
     const s = path.join(src, e.name);
     const d = path.join(dest, e.name);
@@ -42,14 +42,14 @@ async function copyDir(src, dest) {
 }
 
 /* =========================
-   ZIPAR PASTA
+   ZIP DIR
 ========================= */
 function zipDir(source, zipPath) {
   return new Promise((resolve, reject) => {
     const output = fs.createWriteStream(zipPath);
     const archive = archiver('zip', { zlib: { level: 9 } });
 
-    output.on('close', resolve);
+    output.on('close', () => resolve());
     archive.on('error', reject);
 
     archive.pipe(output);
@@ -59,15 +59,31 @@ function zipDir(source, zipPath) {
 }
 
 /* =========================
-   SALVAR + ZIPAR SESSÃO
+   SAVE + ZIP SESSION
 ========================= */
-async function saveAndZipSession(session) {
+async function saveAndZipSession(session, socket) {
   const authDir = path.join(__dirname, '.wwebjs_auth', session);
   const targetDir = path.join(__dirname, 'conectado', session);
   const zipDirPath = path.join(__dirname, 'zips');
   const zipPath = path.join(zipDirPath, `${session}.zip`);
 
-  if (!fs.existsSync(authDir)) return null;
+  sessionState[session] = 'waiting-files';
+  log(socket, session, '⏳ Aguardando WhatsApp gravar arquivos da sessão...');
+
+  // aguarda garantir que os arquivos existam
+  for (let i = 0; i < 10; i++) {
+    if (fs.existsSync(authDir)) break;
+    await new Promise(r => setTimeout(r, 1000));
+  }
+
+  if (!fs.existsSync(authDir)) {
+    sessionState[session] = 'error';
+    log(socket, session, '❌ Pasta de autenticação não encontrada');
+    return null;
+  }
+
+  sessionState[session] = 'copying';
+  log(socket, session, '📁 Copiando arquivos da sessão...');
 
   await fsp.mkdir(zipDirPath, { recursive: true });
 
@@ -75,13 +91,20 @@ async function saveAndZipSession(session) {
     await fsp.rm(targetDir, { recursive: true, force: true });
 
   await copyDir(authDir, targetDir);
+
+  sessionState[session] = 'zipping';
+  log(socket, session, '🗜️ Compactando sessão (ZIP)...');
+
   await zipDir(targetDir, zipPath);
+
+  sessionState[session] = 'ready';
+  log(socket, session, '✅ ZIP criado com sucesso e pronto para download');
 
   return zipPath;
 }
 
 /* =========================
-   INICIAR SESSÃO
+   START SESSION
 ========================= */
 function startSession(socket, session) {
   if (clients[session]) {
@@ -90,13 +113,14 @@ function startSession(socket, session) {
   }
 
   qrAttempts[session] = 0;
+  sessionState[session] = 'starting';
   log(socket, session, '🚀 Iniciando sessão');
 
   const client = new Client({
     authStrategy: new LocalAuth({ clientId: session }),
     puppeteer: {
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
+      args: ['--no-sandbox','--disable-setuid-sandbox']
     }
   });
 
@@ -104,32 +128,34 @@ function startSession(socket, session) {
 
   client.on('qr', qr => {
     qrAttempts[session]++;
-    socket.emit('qr', {
-      session,
-      qr,
-      attempt: qrAttempts[session]
-    });
-
+    sessionState[session] = 'qr';
+    socket.emit('qr', { session, qr, attempt: qrAttempts[session] });
     log(socket, session, `📷 QR gerado (${qrAttempts[session]}/15)`);
 
     if (qrAttempts[session] >= 15) {
-      socket.emit('session-ended', {
-        session,
-        reason: 'Limite de QR atingido'
-      });
+      socket.emit('session-ended', { session, reason: 'Limite de QR atingido' });
       destroySession(session, socket);
     }
   });
 
   client.on('ready', async () => {
-    log(socket, session, '✅ Sessão conectada');
+    sessionState[session] = 'connected';
+    log(socket, session, '🔐 WhatsApp conectado');
 
-    const zipPath = await saveAndZipSession(session);
+    const zipPath = await saveAndZipSession(session, socket);
 
-    socket.emit('session-ready', {
-      session,
-      zipFile: zipPath ? `/download/${session}` : null
-    });
+    if (zipPath) {
+      socket.emit('session-ready', {
+        session,
+        zipStatus: 'ready',
+        zipFile: `/download/${session}`
+      });
+    } else {
+      socket.emit('session-ready', {
+        session,
+        zipStatus: 'error'
+      });
+    }
   });
 
   client.on('disconnected', reason => {
@@ -137,20 +163,17 @@ function startSession(socket, session) {
     destroySession(session, socket);
   });
 
-  client.on('auth_failure', msg => {
-    log(socket, session, `❌ Falha de autenticação: ${msg}`);
-  });
-
   client.initialize();
 }
 
 /* =========================
-   ENCERRAR SESSÃO
+   DESTROY SESSION
 ========================= */
 function destroySession(session, socket) {
   try {
     clients[session]?.destroy();
     delete clients[session];
+    delete sessionState[session];
     qrAttempts[session] = 0;
     log(socket, session, '🛑 Sessão encerrada');
   } catch (e) {
@@ -163,14 +186,14 @@ function destroySession(session, socket) {
 ========================= */
 app.get('/download/:session', (req, res) => {
   const zipPath = path.join(__dirname, 'zips', `${req.params.session}.zip`);
-  if (!fs.existsSync(zipPath))
-    return res.status(404).send('ZIP não encontrado');
-
+  if (!fs.existsSync(zipPath)) {
+    return res.status(404).send('ZIP ainda não está pronto');
+  }
   res.download(zipPath);
 });
 
 /* =========================
-   SOCKET.IO
+   SOCKET
 ========================= */
 io.on('connection', socket => {
   socket.on('start-session', session => {
@@ -182,9 +205,6 @@ io.on('connection', socket => {
   });
 });
 
-/* =========================
-   START SERVER
-========================= */
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () =>
   console.log(`🌐 Servidor rodando na porta ${PORT}`)
