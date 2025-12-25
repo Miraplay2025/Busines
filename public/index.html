@@ -2,186 +2,144 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>WhatsApp Web - Sessão</title>
-
+<title>WhatsApp Session Manager</title>
 <style>
-  body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    background: linear-gradient(135deg,#4facfe,#00f2fe);
-    color:#333;
-    display:flex;
-    flex-direction:column;
-    align-items:center;
-    min-height:100vh;
-    padding:20px;
-  }
-  h1 {
-    color:#fff;
-    margin-bottom:20px;
-    text-shadow:2px 2px 8px rgba(0,0,0,0.2);
-  }
-  .input-group {
-    display:flex;
-    margin-bottom:20px;
-  }
-  input {
-    padding:12px;
-    font-size:16px;
-    border-radius:8px 0 0 8px;
-    border:none;
-    width:250px;
-  }
-  button {
-    padding:12px 20px;
-    font-size:16px;
-    border-radius:0 8px 8px 0;
-    border:none;
-    background:#ffb347;
-    color:#fff;
-    cursor:pointer;
-  }
-  #status {
-    margin-top:10px;
-    font-size:18px;
-    font-weight:bold;
-    color:#fff;
-  }
-  #qrContainer {
-    margin-top:20px;
-    background:#fff;
-    padding:15px;
-    border-radius:16px;
-    display:none;
-    flex-direction:column;
-    align-items:center;
-  }
-  #sessionBox {
-    margin-top:20px;
-    background:#fff;
-    padding:16px;
-    border-radius:16px;
-    width:100%;
-    max-width:500px;
-    display:none;
-    text-align:center;
-    box-shadow:0 6px 12px rgba(0,0,0,.2);
-  }
-  #sessionBox h3 {
-    margin-bottom:10px;
-  }
-  #downloadBtn {
-    padding:12px 20px;
-    border:none;
-    border-radius:8px;
-    background:#28a745;
-    color:#fff;
-    font-size:16px;
-    cursor:pointer;
-  }
-  #logs {
-    margin-top:20px;
-    width:100%;
-    max-width:600px;
-    background:#fff;
-    border-radius:12px;
-    padding:15px;
-    max-height:300px;
-    overflow-y:auto;
-    font-size:14px;
-  }
+body {
+  font-family: Arial;
+  background: linear-gradient(135deg,#4facfe,#00f2fe);
+  padding:20px;
+  color:#fff;
+  text-align:center;
+}
+input, button {
+  padding:12px;
+  font-size:16px;
+}
+button {
+  background:#ff9800;
+  color:#fff;
+  border:none;
+  border-radius:6px;
+  cursor:pointer;
+}
+#qrBox, #sessionBox {
+  background:#fff;
+  color:#000;
+  padding:15px;
+  border-radius:12px;
+  margin-top:20px;
+  display:none;
+}
+#logs {
+  background:#fff;
+  color:#000;
+  margin-top:20px;
+  padding:10px;
+  border-radius:10px;
+  max-height:300px;
+  overflow:auto;
+  text-align:left;
+  font-size:13px;
+}
+#downloadBtn {
+  background:#28a745;
+  margin-top:10px;
+}
 </style>
 </head>
 
 <body>
 
-<h1>WhatsApp Web - Sessão</h1>
+<h2>WhatsApp Web – Sessão</h2>
 
-<div class="input-group">
-  <input type="text" id="sessionName" placeholder="Nome da sessão">
-  <button id="startBtn">Iniciar Sessão</button>
-</div>
+<input id="sessionName" placeholder="Nome da sessão">
+<button onclick="startSession()">Iniciar</button>
 
-<div id="status">Aguardando ação...</div>
+<div id="status">Aguardando...</div>
 
-<div id="qrContainer">
-  <canvas id="qrCanvas"></canvas>
+<div id="qrBox">
+  <canvas id="qrCanvas" width="260" height="260"></canvas>
   <div id="qrAttempts"></div>
 </div>
 
 <div id="sessionBox">
   <h3 id="sessionTitle"></h3>
-  <button id="downloadBtn">⬇️ Baixar ZIP da Sessão</button>
+  <button id="downloadBtn" disabled>⬇️ ZIP ainda não disponível</button>
 </div>
 
 <div id="logs"></div>
 
-<script src="/socket.io/socket.io.js"></script>
+<script src="https://busines-3nfg.onrender.com/socket.io/socket.io.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
 
 <script>
-const socket = io();
+const socket = io('https://busines-3nfg.onrender.com', {
+  transports:['websocket']
+});
 
-const startBtn = document.getElementById('startBtn');
-const sessionNameInput = document.getElementById('sessionName');
-const logsDiv = document.getElementById('logs');
+const logs = document.getElementById('logs');
 const statusDiv = document.getElementById('status');
-const qrContainer = document.getElementById('qrContainer');
+const qrBox = document.getElementById('qrBox');
 const qrCanvas = document.getElementById('qrCanvas');
-const qrAttemptsDiv = document.getElementById('qrAttempts');
-
+const qrAttempts = document.getElementById('qrAttempts');
 const sessionBox = document.getElementById('sessionBox');
 const sessionTitle = document.getElementById('sessionTitle');
 const downloadBtn = document.getElementById('downloadBtn');
 
-function addLog(msg){
-  const p = document.createElement('p');
-  p.textContent = msg;
-  logsDiv.appendChild(p);
-  logsDiv.scrollTop = logsDiv.scrollHeight;
+function log(msg){
+  const d = document.createElement('div');
+  d.textContent = msg;
+  logs.appendChild(d);
+  logs.scrollTop = logs.scrollHeight;
 }
 
-startBtn.onclick = () => {
-  const name = sessionNameInput.value.trim();
-  if (!name) return alert('Digite o nome da sessão');
+function startSession(){
+  const name = document.getElementById('sessionName').value.trim();
+  if(!name) return alert('Digite o nome da sessão');
   socket.emit('start-session', name);
-  statusDiv.textContent = `Iniciando sessão: ${name}`;
-  addLog(`🚀 Iniciando sessão "${name}"`);
-};
+  statusDiv.textContent = '🚀 Iniciando sessão...';
+  log('🚀 Sessão solicitada: ' + name);
+}
 
-// Logs do servidor
-socket.on('log', msg => addLog(msg));
+socket.on('log', msg => log(msg));
 
-// QR Code
 socket.on('qr', data => {
-  qrContainer.style.display = 'flex';
-  qrAttemptsDiv.textContent = `Tentativa ${data.attempt}/15`;
-  QRCode.toCanvas(qrCanvas, data.qr, { width: 240 });
+  qrBox.style.display = 'block';
+  sessionBox.style.display = 'none';
+
+  const ctx = qrCanvas.getContext('2d');
+  ctx.clearRect(0,0,qrCanvas.width,qrCanvas.height);
+
+  QRCode.toCanvas(qrCanvas, data.qr, { width:260 });
+  qrAttempts.textContent = `Tentativa ${data.attempt}/15`;
   statusDiv.textContent = '📷 Escaneie o QR Code';
 });
 
-// Sessão pronta (ZIP disponível)
 socket.on('session-ready', data => {
-  qrContainer.style.display = 'none';
+  qrBox.style.display = 'none';
   sessionBox.style.display = 'block';
+  sessionTitle.textContent = 'Sessão: ' + data.session;
 
-  sessionTitle.textContent = `Sessão conectada: ${data.session}`;
-  statusDiv.textContent = '✅ Sessão conectada com sucesso';
-
-  addLog(`✅ Sessão "${data.session}" conectada`);
-  addLog(`📦 ZIP disponível para download`);
-
-  downloadBtn.onclick = () => {
-    window.location.href = data.zipFile;
-  };
+  if (data.zipStatus === 'ready') {
+    statusDiv.textContent = '✅ ZIP pronto para download';
+    downloadBtn.disabled = false;
+    downloadBtn.textContent = '⬇️ Baixar ZIP da Sessão';
+    downloadBtn.onclick = () => {
+      window.location.href =
+        'https://busines-3nfg.onrender.com' + data.zipFile;
+    };
+    log('✅ ZIP confirmado como pronto');
+  } else {
+    statusDiv.textContent = '⚠️ Sessão conectada, ZIP não disponível';
+    log('⚠️ ZIP não pôde ser criado');
+  }
 });
 
-// Sessão encerrada
 socket.on('session-ended', data => {
-  addLog(`❌ Sessão encerrada: ${data.reason}`);
   statusDiv.textContent = '❌ Sessão encerrada';
+  qrBox.style.display = 'none';
   sessionBox.style.display = 'none';
-  qrContainer.style.display = 'none';
+  log('❌ Sessão encerrada: ' + data.reason);
 });
 </script>
 
