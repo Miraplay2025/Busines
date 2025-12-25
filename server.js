@@ -17,17 +17,13 @@ const io = new Server(server, {
 app.use(cors());
 app.use(express.static('public'));
 
-let clients = {};
-let qrAttempts = {};
+const clients = {};
+const qrAttempts = {};
 
-function getTimestamp() {
-  return new Date().toLocaleString('pt-BR', { timeZone: 'Africa/Maputo' });
-}
-
-function log(socket, sessionName, msg) {
-  const formatted = `[${sessionName}] ${getTimestamp()} ➝ ${msg}`;
-  console.log(formatted);
-  if (socket) socket.emit('log', formatted);
+function log(socket, session, msg) {
+  const text = `[${session}] ${msg}`;
+  console.log(text);
+  socket?.emit('log', text);
 }
 
 /* =========================
@@ -37,30 +33,27 @@ async function copyDir(src, dest) {
   await fsp.mkdir(dest, { recursive: true });
   const entries = await fsp.readdir(src, { withFileTypes: true });
 
-  for (const entry of entries) {
-    const srcPath = path.join(src, entry.name);
-    const destPath = path.join(dest, entry.name);
-    if (entry.isDirectory()) {
-      await copyDir(srcPath, destPath);
-    } else {
-      await fsp.copyFile(srcPath, destPath);
-    }
+  for (const e of entries) {
+    const s = path.join(src, e.name);
+    const d = path.join(dest, e.name);
+    if (e.isDirectory()) await copyDir(s, d);
+    else await fsp.copyFile(s, d);
   }
 }
 
 /* =========================
-   ZIPAR PASTA INTEIRA
+   ZIPAR PASTA
 ========================= */
-function zipDirectory(sourceDir, zipPath) {
+function zipDir(source, zipPath) {
   return new Promise((resolve, reject) => {
     const output = fs.createWriteStream(zipPath);
     const archive = archiver('zip', { zlib: { level: 9 } });
 
-    output.on('close', () => resolve());
-    archive.on('error', err => reject(err));
+    output.on('close', resolve);
+    archive.on('error', reject);
 
     archive.pipe(output);
-    archive.directory(sourceDir, false);
+    archive.directory(source, false);
     archive.finalize();
   });
 }
@@ -68,21 +61,21 @@ function zipDirectory(sourceDir, zipPath) {
 /* =========================
    SALVAR + ZIPAR SESSÃO
 ========================= */
-async function saveAndZipSession(sessionName) {
-  const authDir = path.join(__dirname, '.wwebjs_auth', sessionName);
-  const targetDir = path.join(__dirname, 'conectado', sessionName);
-  const zipDir = path.join(__dirname, 'zips');
-  const zipPath = path.join(zipDir, `${sessionName}.zip`);
+async function saveAndZipSession(session) {
+  const authDir = path.join(__dirname, '.wwebjs_auth', session);
+  const targetDir = path.join(__dirname, 'conectado', session);
+  const zipDirPath = path.join(__dirname, 'zips');
+  const zipPath = path.join(zipDirPath, `${session}.zip`);
 
   if (!fs.existsSync(authDir)) return null;
 
-  await fsp.mkdir(zipDir, { recursive: true });
+  await fsp.mkdir(zipDirPath, { recursive: true });
 
   if (fs.existsSync(targetDir))
     await fsp.rm(targetDir, { recursive: true, force: true });
 
   await copyDir(authDir, targetDir);
-  await zipDirectory(targetDir, zipPath);
+  await zipDir(targetDir, zipPath);
 
   return zipPath;
 }
@@ -90,54 +83,62 @@ async function saveAndZipSession(sessionName) {
 /* =========================
    INICIAR SESSÃO
 ========================= */
-function startSession(socket, sessionName) {
-  if (clients[sessionName]) {
-    log(socket, sessionName, `⚠️ Sessão já ativa`);
+function startSession(socket, session) {
+  if (clients[session]) {
+    log(socket, session, '⚠️ Sessão já ativa');
     return;
   }
 
-  log(socket, sessionName, `🚀 Iniciando sessão`);
-  qrAttempts[sessionName] = 0;
+  qrAttempts[session] = 0;
+  log(socket, session, '🚀 Iniciando sessão');
 
   const client = new Client({
-    authStrategy: new LocalAuth({ clientId: sessionName }),
-    puppeteer: { headless: true, args: ['--no-sandbox','--disable-setuid-sandbox'] }
+    authStrategy: new LocalAuth({ clientId: session }),
+    puppeteer: {
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    }
   });
 
-  clients[sessionName] = client;
+  clients[session] = client;
 
   client.on('qr', qr => {
-    qrAttempts[sessionName]++;
-    socket.emit('qr', { session: sessionName, qr, attempt: qrAttempts[sessionName] });
-    log(socket, sessionName, `📷 QR gerado (${qrAttempts[sessionName]})`);
+    qrAttempts[session]++;
+    socket.emit('qr', {
+      session,
+      qr,
+      attempt: qrAttempts[session]
+    });
 
-    if (qrAttempts[sessionName] >= 15) {
-      socket.emit('session-ended', { session: sessionName, reason: 'Limite QR' });
-      safelyDestroySession(sessionName, socket);
+    log(socket, session, `📷 QR gerado (${qrAttempts[session]}/15)`);
+
+    if (qrAttempts[session] >= 15) {
+      socket.emit('session-ended', {
+        session,
+        reason: 'Limite de QR atingido'
+      });
+      destroySession(session, socket);
     }
   });
 
   client.on('ready', async () => {
-    log(socket, sessionName, `✅ Conectado`);
+    log(socket, session, '✅ Sessão conectada');
 
-    const zipPath = await saveAndZipSession(sessionName);
+    const zipPath = await saveAndZipSession(session);
 
     socket.emit('session-ready', {
-      session: sessionName,
-      status: 'ready',
-      info: client.info,
-      zipAvailable: !!zipPath,
-      zipFile: zipPath ? `/download/${sessionName}` : null
+      session,
+      zipFile: zipPath ? `/download/${session}` : null
     });
   });
 
-  client.on('message', msg => {
-    socket.emit('message', { session: sessionName, message: msg });
+  client.on('disconnected', reason => {
+    socket.emit('session-ended', { session, reason });
+    destroySession(session, socket);
   });
 
-  client.on('disconnected', reason => {
-    socket.emit('session-ended', { session: sessionName, reason });
-    safelyDestroySession(sessionName, socket);
+  client.on('auth_failure', msg => {
+    log(socket, session, `❌ Falha de autenticação: ${msg}`);
   });
 
   client.initialize();
@@ -146,27 +147,25 @@ function startSession(socket, sessionName) {
 /* =========================
    ENCERRAR SESSÃO
 ========================= */
-function safelyDestroySession(sessionName, socket) {
+function destroySession(session, socket) {
   try {
-    if (clients[sessionName]) {
-      clients[sessionName].destroy();
-      delete clients[sessionName];
-    }
-    qrAttempts[sessionName] = 0;
-    log(socket, sessionName, `🛑 Sessão encerrada`);
+    clients[session]?.destroy();
+    delete clients[session];
+    qrAttempts[session] = 0;
+    log(socket, session, '🛑 Sessão encerrada');
   } catch (e) {
     console.error(e);
   }
 }
 
 /* =========================
-   DOWNLOAD DO ZIP
+   DOWNLOAD ZIP
 ========================= */
 app.get('/download/:session', (req, res) => {
   const zipPath = path.join(__dirname, 'zips', `${req.params.session}.zip`);
-  if (!fs.existsSync(zipPath)) {
+  if (!fs.existsSync(zipPath))
     return res.status(404).send('ZIP não encontrado');
-  }
+
   res.download(zipPath);
 });
 
@@ -174,20 +173,19 @@ app.get('/download/:session', (req, res) => {
    SOCKET.IO
 ========================= */
 io.on('connection', socket => {
-  socket.on('start-session', sessionName => {
-    if (!sessionName || !sessionName.trim()) {
-      socket.emit('log', '❌ Nome inválido');
+  socket.on('start-session', session => {
+    if (!session || !session.trim()) {
+      socket.emit('log', '❌ Nome da sessão inválido');
       return;
     }
-    startSession(socket, sessionName.trim());
+    startSession(socket, session.trim());
   });
 });
 
 /* =========================
-   ERROS GLOBAIS
+   START SERVER
 ========================= */
-process.on('uncaughtException', err => console.error(err));
-process.on('unhandledRejection', err => console.error(err));
-
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`🌐 Servidor rodando na porta ${PORT}`));
+server.listen(PORT, () =>
+  console.log(`🌐 Servidor rodando na porta ${PORT}`)
+);
