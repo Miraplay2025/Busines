@@ -1,147 +1,158 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-<meta charset="UTF-8">
-<title>WhatsApp Session Manager</title>
-<style>
-body {
-  font-family: Arial;
-  background: linear-gradient(135deg,#4facfe,#00f2fe);
-  padding:20px;
-  color:#fff;
-  text-align:center;
-}
-input, button {
-  padding:12px;
-  font-size:16px;
-}
-button {
-  background:#ff9800;
-  color:#fff;
-  border:none;
-  border-radius:6px;
-  cursor:pointer;
-}
-#qrBox, #sessionBox {
-  background:#fff;
-  color:#000;
-  padding:15px;
-  border-radius:12px;
-  margin-top:20px;
-  display:none;
-}
-#logs {
-  background:#fff;
-  color:#000;
-  margin-top:20px;
-  padding:10px;
-  border-radius:10px;
-  max-height:300px;
-  overflow:auto;
-  text-align:left;
-  font-size:13px;
-}
-#downloadBtn {
-  background:#28a745;
-  margin-top:10px;
-}
-</style>
-</head>
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+const { Client, LocalAuth } = require('whatsapp-web.js');
+const fs = require('fs');
+const path = require('path');
+const archiver = require('archiver');
+const cors = require('cors');
 
-<body>
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: '*' } });
 
-<h2>WhatsApp Web – Sessão</h2>
+app.use(cors());
+app.use(express.static('public'));
 
-<input id="sessionName" placeholder="Nome da sessão">
-<button onclick="startSession()">Iniciar</button>
+const clients = {};
+const qrAttempts = {};
 
-<div id="status">Aguardando...</div>
-
-<div id="qrBox">
-  <canvas id="qrCanvas" width="260" height="260"></canvas>
-  <div id="qrAttempts"></div>
-</div>
-
-<div id="sessionBox">
-  <h3 id="sessionTitle"></h3>
-  <button id="downloadBtn" disabled>⬇️ ZIP ainda não disponível</button>
-</div>
-
-<div id="logs"></div>
-
-<script src="https://busines-3nfg.onrender.com/socket.io/socket.io.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
-
-<script>
-const socket = io('https://busines-3nfg.onrender.com', {
-  transports:['websocket']
-});
-
-const logs = document.getElementById('logs');
-const statusDiv = document.getElementById('status');
-const qrBox = document.getElementById('qrBox');
-const qrCanvas = document.getElementById('qrCanvas');
-const qrAttempts = document.getElementById('qrAttempts');
-const sessionBox = document.getElementById('sessionBox');
-const sessionTitle = document.getElementById('sessionTitle');
-const downloadBtn = document.getElementById('downloadBtn');
-
-function log(msg){
-  const d = document.createElement('div');
-  d.textContent = msg;
-  logs.appendChild(d);
-  logs.scrollTop = logs.scrollHeight;
+function log(socket, session, msg) {
+  const m = `[${session}] ${msg}`;
+  console.log(m);
+  socket.emit('log', m);
 }
 
-function startSession(){
-  const name = document.getElementById('sessionName').value.trim();
-  if(!name) return alert('Digite o nome da sessão');
-  socket.emit('start-session', name);
-  statusDiv.textContent = '🚀 Iniciando sessão...';
-  log('🚀 Sessão solicitada: ' + name);
+/* ==========================
+   ZIP FOLDER
+========================== */
+function zipFolder(source, out) {
+  return new Promise((resolve, reject) => {
+    const output = fs.createWriteStream(out);
+    const archive = archiver('zip', { zlib: { level: 9 } });
+
+    output.on('close', resolve);
+    archive.on('error', reject);
+
+    archive.pipe(output);
+    archive.directory(source, false);
+    archive.finalize();
+  });
 }
 
-socket.on('log', msg => log(msg));
-
-socket.on('qr', data => {
-  qrBox.style.display = 'block';
-  sessionBox.style.display = 'none';
-
-  const ctx = qrCanvas.getContext('2d');
-  ctx.clearRect(0,0,qrCanvas.width,qrCanvas.height);
-
-  QRCode.toCanvas(qrCanvas, data.qr, { width:260 });
-  qrAttempts.textContent = `Tentativa ${data.attempt}/15`;
-  statusDiv.textContent = '📷 Escaneie o QR Code';
-});
-
-socket.on('session-ready', data => {
-  qrBox.style.display = 'none';
-  sessionBox.style.display = 'block';
-  sessionTitle.textContent = 'Sessão: ' + data.session;
-
-  if (data.zipStatus === 'ready') {
-    statusDiv.textContent = '✅ ZIP pronto para download';
-    downloadBtn.disabled = false;
-    downloadBtn.textContent = '⬇️ Baixar ZIP da Sessão';
-    downloadBtn.onclick = () => {
-      window.location.href =
-        'https://busines-3nfg.onrender.com' + data.zipFile;
-    };
-    log('✅ ZIP confirmado como pronto');
-  } else {
-    statusDiv.textContent = '⚠️ Sessão conectada, ZIP não disponível';
-    log('⚠️ ZIP não pôde ser criado');
+/* ==========================
+   WAIT FOR AUTH FILES
+========================== */
+async function waitForAuthFolder(authPath, socket, session) {
+  log(socket, session, '⏳ Aguardando WhatsApp finalizar gravação da sessão...');
+  for (let i = 0; i < 15; i++) {
+    if (
+      fs.existsSync(authPath) &&
+      fs.readdirSync(authPath).length > 0
+    ) {
+      log(socket, session, '📁 Pasta de sessão detectada');
+      return true;
+    }
+    await new Promise(r => setTimeout(r, 1000));
   }
+  return false;
+}
+
+/* ==========================
+   START SESSION
+========================== */
+function startSession(socket, session) {
+  if (clients[session]) {
+    log(socket, session, '⚠️ Sessão já ativa');
+    return;
+  }
+
+  qrAttempts[session] = 0;
+  log(socket, session, '🚀 Iniciando sessão');
+
+  const client = new Client({
+    authStrategy: new LocalAuth({ clientId: session }),
+    puppeteer: {
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    }
+  });
+
+  clients[session] = client;
+
+  client.on('qr', qr => {
+    qrAttempts[session]++;
+    socket.emit('qr', { session, qr, attempt: qrAttempts[session] });
+    log(socket, session, `📷 QR gerado (${qrAttempts[session]}/15)`);
+
+    if (qrAttempts[session] >= 15) {
+      socket.emit('session-ended', { session, reason: 'QR expirado' });
+      client.destroy();
+    }
+  });
+
+  client.on('ready', async () => {
+    log(socket, session, '🔐 WhatsApp conectado');
+
+    const authPath = path.join(__dirname, '.wwebjs_auth', `session-${session}`);
+    const zipDir = path.join(__dirname, 'zips');
+    const zipPath = path.join(zipDir, `${session}.zip`);
+
+    if (!fs.existsSync(zipDir)) fs.mkdirSync(zipDir);
+
+    const ok = await waitForAuthFolder(authPath, socket, session);
+
+    if (!ok) {
+      log(socket, session, '❌ Falha ao localizar arquivos da sessão');
+      socket.emit('session-ready', { session, zipStatus: 'error' });
+      return;
+    }
+
+    log(socket, session, '🗜️ Compactando pasta da sessão...');
+    await zipFolder(authPath, zipPath);
+
+    log(socket, session, '✅ ZIP pronto para download');
+
+    socket.emit('session-ready', {
+      session,
+      zipStatus: 'ready',
+      downloadUrl: `/download/${session}`
+    });
+  });
+
+  client.on('disconnected', reason => {
+    log(socket, session, '❌ Sessão desconectada: ' + reason);
+    socket.emit('session-ended', { session, reason });
+  });
+
+  client.initialize();
+}
+
+/* ==========================
+   DOWNLOAD
+========================== */
+app.get('/download/:session', (req, res) => {
+  const zip = path.join(__dirname, 'zips', `${req.params.session}.zip`);
+  if (!fs.existsSync(zip)) {
+    return res.status(404).send('ZIP ainda não disponível');
+  }
+  res.download(zip);
 });
 
-socket.on('session-ended', data => {
-  statusDiv.textContent = '❌ Sessão encerrada';
-  qrBox.style.display = 'none';
-  sessionBox.style.display = 'none';
-  log('❌ Sessão encerrada: ' + data.reason);
+/* ==========================
+   SOCKET
+========================== */
+io.on('connection', socket => {
+  socket.on('start-session', session => {
+    if (!session || !session.trim()) {
+      socket.emit('log', '❌ Nome da sessão inválido');
+      return;
+    }
+    startSession(socket, session.trim());
+  });
 });
-</script>
 
-</body>
-</html>
+const PORT = process.env.PORT || 10000;
+server.listen(PORT, () =>
+  console.log(`🌐 Servidor rodando na porta ${PORT}`)
+);
