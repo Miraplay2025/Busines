@@ -2,135 +2,109 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>WhatsApp Session</title>
+<title>Restore WhatsApp Session</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
 
 <style>
 body {
-  font-family: Arial, sans-serif;
-  background: linear-gradient(135deg,#4facfe,#00f2fe);
-  padding:15px;
+  background: linear-gradient(135deg,#00c6ff,#0072ff);
+  font-family: Arial;
+  padding:20px;
   color:#fff;
 }
-.container {
+.card {
   max-width:420px;
+  background:#fff;
+  color:#000;
+  padding:20px;
+  border-radius:15px;
   margin:auto;
-  text-align:center;
 }
 input, button {
   width:100%;
   padding:14px;
   margin-top:10px;
-  font-size:16px;
-  border-radius:8px;
+  border-radius:10px;
   border:none;
 }
 button {
-  background:#ff9800;
+  background:#0072ff;
   color:#fff;
 }
-#downloadBtn {
-  background:#28a745;
-}
-.box {
-  background:#fff;
-  color:#000;
-  margin-top:15px;
-  padding:12px;
-  border-radius:10px;
-  display:none;
-}
-#logs {
-  max-height:220px;
+.log {
+  background:#111;
+  color:#0f0;
+  padding:10px;
+  height:150px;
   overflow:auto;
-  font-size:13px;
+  margin-top:15px;
 }
-canvas {
-  width:100%;
-  max-width:260px;
+.group {
+  background:#f1f1f1;
+  padding:10px;
+  margin-top:5px;
+  border-radius:8px;
 }
 </style>
 </head>
 
 <body>
 
-<div class="container">
-  <h2>WhatsApp Web</h2>
+<div class="card">
+  <h2>Restaurar Sessão WhatsApp</h2>
 
-  <input id="sessionName" placeholder="Nome da sessão">
-  <button onclick="start()">Iniciar Sessão</button>
+  <input type="file" id="file">
+  <input placeholder="Ou cole link do ZIP" id="url">
 
-  <div id="status">Aguardando...</div>
+  <button onclick="restore()">Restaurar Sessão</button>
 
-  <div id="qrBox" class="box">
-    <canvas id="qr"></canvas>
-    <div id="qrInfo"></div>
-  </div>
+  <div class="log" id="log"></div>
 
-  <div id="downloadBox" class="box">
-    <h3 id="sessionTitle"></h3>
-    <button id="downloadBtn" disabled>ZIP ainda não pronto</button>
-  </div>
-
-  <div id="logs" class="box"></div>
+  <div id="result"></div>
 </div>
 
-<script src="https://busines-3nfg.onrender.com/socket.io/socket.io.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
-
+<script src="/socket.io/socket.io.js"></script>
 <script>
-const socket = io('https://busines-3nfg.onrender.com', {
-  transports:['websocket']
-});
-
-const logBox = document.getElementById('logs');
-const status = document.getElementById('status');
-const qrBox = document.getElementById('qrBox');
-const qrCanvas = document.getElementById('qr');
-const qrInfo = document.getElementById('qrInfo');
-const downloadBox = document.getElementById('downloadBox');
-const downloadBtn = document.getElementById('downloadBtn');
-const sessionTitle = document.getElementById('sessionTitle');
+const socket = io();
+const logBox = document.getElementById('log');
 
 function log(msg){
-  const d = document.createElement('div');
-  d.textContent = msg;
-  logBox.appendChild(d);
+  logBox.innerHTML += msg + '<br>';
   logBox.scrollTop = logBox.scrollHeight;
-  logBox.style.display = 'block';
 }
 
-function start(){
-  const name = document.getElementById('sessionName').value.trim();
-  if(!name) return alert('Digite o nome da sessão');
-  socket.emit('start-session', name);
-  status.textContent = '🚀 Iniciando sessão...';
+function restore(){
+  const file = document.getElementById('file').files[0];
+  const url = document.getElementById('url').value;
+
+  if (file) {
+    socket.emit('restore-session', {
+      type:'upload',
+      file
+    });
+  } else if (url) {
+    socket.emit('restore-session', {
+      type:'url',
+      url
+    });
+  } else {
+    alert('Envie um ZIP ou link');
+  }
 }
 
 socket.on('log', log);
 
-socket.on('qr', d => {
-  qrBox.style.display = 'block';
-  downloadBox.style.display = 'none';
-  QRCode.toCanvas(qrCanvas, d.qr, { width:260 });
-  qrInfo.textContent = `Tentativa ${d.attempt}/15`;
-  status.textContent = '📷 Escaneie o QR Code';
-});
-
-socket.on('session-ready', d => {
-  qrBox.style.display = 'none';
-  downloadBox.style.display = 'block';
-  sessionTitle.textContent = 'Sessão: ' + d.session;
-
-  if (d.zipStatus === 'ready') {
-    status.textContent = '✅ ZIP pronto';
-    downloadBtn.disabled = false;
-    downloadBtn.textContent = '⬇️ Baixar ZIP';
-    downloadBtn.onclick = () => {
-      window.location.href =
-        'https://busines-3nfg.onrender.com' + d.downloadUrl;
-    };
-  }
+socket.on('session-data', data => {
+  const r = document.getElementById('result');
+  r.innerHTML = `
+    <h3>${data.name} (${data.number})</h3>
+    <h4>Grupos</h4>
+    ${data.groups.map(g => `
+      <div class="group">
+        ${g.name} - ${g.members} membros
+      </div>
+    `).join('')}
+  `;
 });
 </script>
 
