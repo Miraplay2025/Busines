@@ -4,7 +4,6 @@ const { Server } = require('socket.io');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const fs = require('fs');
 const path = require('path');
-const archiver = require('archiver');
 const cors = require('cors');
 
 const app = express();
@@ -13,69 +12,79 @@ const io = new Server(server, { cors: { origin: '*' } });
 
 app.use(cors());
 app.use(express.static('public'));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
+// Objetos para clientes ativos e tentativas de QR
 const clients = {};
 const qrAttempts = {};
 
+// Envia log para o front-end
 function log(socket, session, msg) {
   const m = `[${session}] ${msg}`;
   console.log(m);
   socket.emit('log', m);
 }
 
-/* ==========================
-   ZIP FOLDER
-========================== */
-function zipFolder(source, out) {
-  return new Promise((resolve, reject) => {
-    const output = fs.createWriteStream(out);
-    const archive = archiver('zip', { zlib: { level: 9 } });
-
-    output.on('close', resolve);
-    archive.on('error', reject);
-
-    archive.pipe(output);
-    archive.directory(source, false);
-    archive.finalize();
-  });
+// Retorna apenas sessões **ativas/conectadas**
+function getActiveSessions() {
+  return Object.keys(clients).filter(s => clients[s] && clients[s].info && clients[s].info.connected);
 }
 
-/* ==========================
-   WAIT FOR AUTH FILES
-========================== */
+// Espera pasta de autenticação ser criada
 async function waitForAuthFolder(authPath, socket, session) {
-  log(socket, session, '⏳ Aguardando WhatsApp finalizar gravação da sessão...');
+  log(socket, session, '⏳ Aguardando gravação da sessão WhatsApp...');
   for (let i = 0; i < 15; i++) {
-    if (
-      fs.existsSync(authPath) &&
-      fs.readdirSync(authPath).length > 0
-    ) {
-      log(socket, session, '📁 Pasta de sessão detectada');
+    if (fs.existsSync(authPath) && fs.readdirSync(authPath).length > 0) {
+      log(socket, session, '📁 Pasta de sessão detectada!');
       return true;
     }
     await new Promise(r => setTimeout(r, 1000));
   }
+  log(socket, session, '❌ Não foi possível localizar a pasta de sessão!');
   return false;
 }
 
-/* ==========================
-   START SESSION
-========================== */
+// Obter informações da conta e grupos
+async function getAccountInfo(client) {
+  const me = await client.getMe();
+  const chats = await client.getChats();
+  const groups = chats.filter(c => c.isGroup);
+
+  const groupData = [];
+  for (let group of groups) {
+    const participants = group.participants;
+    const members = participants
+      .filter(p => !p.id.user.startsWith('258'))
+      .map(p => p.id.user);
+
+    groupData.push({
+      id: group.id._serialized,
+      name: group.name,
+      members
+    });
+  }
+
+  return {
+    name: me.pushname || 'Sem nome',
+    number: me.number ? me.number._serialized : 'Unknown',
+    groups: groupData
+  };
+}
+
+// Inicia sessão
 function startSession(socket, session) {
   if (clients[session]) {
-    log(socket, session, '⚠️ Sessão já ativa');
+    log(socket, session, '⚠️ Sessão já ativa!');
     return;
   }
 
   qrAttempts[session] = 0;
-  log(socket, session, '🚀 Iniciando sessão');
+  log(socket, session, '🚀 Iniciando sessão...');
 
   const client = new Client({
     authStrategy: new LocalAuth({ clientId: session }),
-    puppeteer: {
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
-    }
+    puppeteer: { headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] }
   });
 
   clients[session] = client;
@@ -87,62 +96,53 @@ function startSession(socket, session) {
 
     if (qrAttempts[session] >= 15) {
       socket.emit('session-ended', { session, reason: 'QR expirado' });
+      log(socket, session, '❌ QR expirado, encerrando sessão');
       client.destroy();
     }
   });
 
   client.on('ready', async () => {
-    log(socket, session, '🔐 WhatsApp conectado');
-
+    log(socket, session, '🔐 WhatsApp conectado!');
     const authPath = path.join(__dirname, '.wwebjs_auth', `session-${session}`);
-    const zipDir = path.join(__dirname, 'zips');
-    const zipPath = path.join(zipDir, `${session}.zip`);
+    await waitForAuthFolder(authPath, socket, session);
 
-    if (!fs.existsSync(zipDir)) fs.mkdirSync(zipDir);
+    try {
+      const accountInfo = await getAccountInfo(client);
+      client.info.connected = true; // marca como conectado
+      log(socket, session, '📊 Informações da conta e grupos obtidas com sucesso!');
+      socket.emit('session-ready', { session, accountInfo });
 
-    const ok = await waitForAuthFolder(authPath, socket, session);
+      // Atualiza sessões ativas para todos os clientes
+      io.emit('update-active-sessions', { sessions: getActiveSessions() });
 
-    if (!ok) {
-      log(socket, session, '❌ Falha ao localizar arquivos da sessão');
-      socket.emit('session-ready', { session, zipStatus: 'error' });
-      return;
+    } catch (e) {
+      log(socket, session, '❌ Erro ao obter informações da conta: ' + e.message);
+      socket.emit('session-ready', { session, error: e.message });
     }
-
-    log(socket, session, '🗜️ Compactando pasta da sessão...');
-    await zipFolder(authPath, zipPath);
-
-    log(socket, session, '✅ ZIP pronto para download');
-
-    socket.emit('session-ready', {
-      session,
-      zipStatus: 'ready',
-      downloadUrl: `/download/${session}`
-    });
   });
 
   client.on('disconnected', reason => {
     log(socket, session, '❌ Sessão desconectada: ' + reason);
+    client.info.connected = false;
     socket.emit('session-ended', { session, reason });
+
+    // Atualiza sessões ativas para todos os clientes
+    io.emit('update-active-sessions', { sessions: getActiveSessions() });
   });
 
   client.initialize();
 }
 
-/* ==========================
-   DOWNLOAD
-========================== */
-app.get('/download/:session', (req, res) => {
-  const zip = path.join(__dirname, 'zips', `${req.params.session}.zip`);
-  if (!fs.existsSync(zip)) {
-    return res.status(404).send('ZIP ainda não disponível');
-  }
-  res.download(zip);
-});
-
-/* ==========================
-   SOCKET
-========================== */
+// Socket.IO
 io.on('connection', socket => {
+  // Envia sessões ativas assim que o usuário acessa
+  const active = getActiveSessions();
+  if (active.length === 0) {
+    socket.emit('update-active-sessions', { sessions: [], message: 'Nenhuma sessão ativa' });
+  } else {
+    socket.emit('update-active-sessions', { sessions: active });
+  }
+
   socket.on('start-session', session => {
     if (!session || !session.trim()) {
       socket.emit('log', '❌ Nome da sessão inválido');
@@ -150,9 +150,46 @@ io.on('connection', socket => {
     }
     startSession(socket, session.trim());
   });
+
+  // Adicionar membros
+  socket.on('add-members', async data => {
+    const { session, groupId, members } = data;
+    const client = clients[session];
+    if (!client || !client.info.connected) return socket.emit('add-progress', { error: 'Sessão inválida ou desconectada' });
+
+    let added = 0;
+    socket.emit('add-progress', { total: members.length, added });
+
+    for (let m of members) {
+      try {
+        await client.addParticipant(groupId, `${m}@c.us`);
+        added++;
+        socket.emit('add-progress', { total: members.length, added });
+      } catch (e) {
+        socket.emit('add-progress', { total: members.length, added, error: `Erro ao adicionar ${m}: ${e.message}` });
+      }
+    }
+
+    socket.emit('add-complete', { total: members.length, added });
+    log(socket, session, `✅ Adicionados ${added}/${members.length} membros ao grupo`);
+  });
+
+  // Enviar mensagem
+  socket.on('send-message', async info => {
+    const { session, number, text } = info;
+    const client = clients[session];
+    if (!client || !client.info.connected) return socket.emit('msg-status', { error: 'Sessão inválida ou desconectada' });
+
+    try {
+      await client.sendMessage(`${number}@c.us`, text);
+      socket.emit('msg-status', { success: true, number });
+      log(socket, session, `📩 Mensagem enviada para ${number}`);
+    } catch (e) {
+      socket.emit('msg-status', { error: e.message, number });
+      log(socket, session, `❌ Falha ao enviar mensagem para ${number}: ${e.message}`);
+    }
+  });
 });
 
 const PORT = process.env.PORT || 10000;
-server.listen(PORT, () =>
-  console.log(`🌐 Servidor rodando na porta ${PORT}`)
-);
+server.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
