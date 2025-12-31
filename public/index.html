@@ -2,137 +2,223 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>WhatsApp Session</title>
-
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WhatsApp Manager</title>
 <style>
-body {
-  font-family: Arial, sans-serif;
-  background: linear-gradient(135deg,#4facfe,#00f2fe);
-  padding:15px;
-  color:#fff;
-}
-.container {
-  max-width:420px;
-  margin:auto;
-  text-align:center;
-}
-input, button {
-  width:100%;
-  padding:14px;
-  margin-top:10px;
-  font-size:16px;
-  border-radius:8px;
-  border:none;
-}
-button {
-  background:#ff9800;
-  color:#fff;
-}
-#downloadBtn {
-  background:#28a745;
-}
-.box {
-  background:#fff;
-  color:#000;
-  margin-top:15px;
-  padding:12px;
-  border-radius:10px;
-  display:none;
-}
-#logs {
-  max-height:220px;
-  overflow:auto;
-  font-size:13px;
-}
-canvas {
-  width:100%;
-  max-width:260px;
-}
+body { font-family:Arial; margin:0; background:#f0f2f5; }
+header { background:#007bff; color:#fff; padding:10px; display:flex; justify-content:space-between; }
+header button { background:#fff; color:#007bff; border:none; padding:8px; cursor:pointer; border-radius:4px; margin-left:5px;}
+.container { padding:15px; max-width:900px; margin:auto; }
+.box { background:#fff; padding:12px; margin-top:15px; border-radius:8px; }
+#logs { max-height:200px; overflow:auto; font-size:13px; }
+.group { border-top:1px solid #ccc; padding:8px 0; }
+#progressBar { width:100%; background:#eee; height:18px; border-radius:9px; overflow:hidden; margin-top:8px; display:none; }
+#progress { background:#28a745; width:0%; height:100%; }
+#popup { position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.6); display:none; justify-content:center; align-items:center; }
+#popup .box { width:90%; max-width:400px; background:#fff; padding:15px; border-radius:8px; }
+canvas { display:block; margin:auto; }
 </style>
 </head>
-
 <body>
 
-<div class="container">
-  <h2>WhatsApp Web</h2>
+<header>
+  <div>WA Manager</div>
+  <div>
+    <button onclick="openAddMembers()">Adicionar membros</button>
+    <button onclick="openSendMsg()">Enviar mensagem</button>
+  </div>
+</header>
 
-  <input id="sessionName" placeholder="Nome da sessão">
+<div class="container">
+
+  <label>Sessões ativas:</label>
+  <select id="activeSessions">
+    <option value="">Nenhuma sessão ativa</option>
+  </select>
+
+  <input id="sessionName" placeholder="Nome da nova sessão">
   <button onclick="start()">Iniciar Sessão</button>
 
-  <div id="status">Aguardando...</div>
+  <div id="status" class="box">Aguardando...</div>
 
-  <div id="qrBox" class="box">
-    <canvas id="qr"></canvas>
+  <div id="qrBox" class="box" style="display:none;">
+    <canvas id="qrCanvas"></canvas>
     <div id="qrInfo"></div>
   </div>
 
-  <div id="downloadBox" class="box">
-    <h3 id="sessionTitle"></h3>
-    <button id="downloadBtn" disabled>ZIP ainda não pronto</button>
+  <div id="accountBox" class="box" style="display:none;">
+    <h3 id="accName"></h3>
+    <p id="accNumber"></p>
+  </div>
+
+  <div id="groupsBox" class="box" style="display:none;"></div>
+
+  <div id="progressBar" class="box">
+    <div id="progress"></div>
+    <div id="progText"></div>
   </div>
 
   <div id="logs" class="box"></div>
+
 </div>
 
-<script src="https://busines-3nfg.onrender.com/socket.io/socket.io.js"></script>
+<div id="popup"><div class="box" id="popupContent"></div></div>
+
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
-
 <script>
-const socket = io('https://busines-3nfg.onrender.com', {
-  transports:['websocket']
-});
+const socket = io(location.origin);
 
-const logBox = document.getElementById('logs');
 const status = document.getElementById('status');
 const qrBox = document.getElementById('qrBox');
-const qrCanvas = document.getElementById('qr');
+const qrCanvas = document.getElementById('qrCanvas');
 const qrInfo = document.getElementById('qrInfo');
-const downloadBox = document.getElementById('downloadBox');
-const downloadBtn = document.getElementById('downloadBtn');
-const sessionTitle = document.getElementById('sessionTitle');
+const accName = document.getElementById('accName');
+const accNumber = document.getElementById('accNumber');
+const accountBox = document.getElementById('accountBox');
+const groupsBox = document.getElementById('groupsBox');
+const logs = document.getElementById('logs');
+const progressBar = document.getElementById('progressBar');
+const progress = document.getElementById('progress');
+const progText = document.getElementById('progText');
+const popup = document.getElementById('popup');
+const popupContent = document.getElementById('popupContent');
+const activeSessionsSelect = document.getElementById('activeSessions');
 
+let currentSession = null;
+let currentGroups = [];
+
+// Logs
 function log(msg){
-  const d = document.createElement('div');
-  d.textContent = msg;
-  logBox.appendChild(d);
-  logBox.scrollTop = logBox.scrollHeight;
-  logBox.style.display = 'block';
+  const d=document.createElement('div'); d.textContent=msg;
+  logs.appendChild(d); logs.scrollTop=logs.scrollHeight;
 }
 
+// Iniciar sessão
 function start(){
-  const name = document.getElementById('sessionName').value.trim();
-  if(!name) return alert('Digite o nome da sessão');
+  let name=document.getElementById('sessionName').value.trim();
+  const existing = activeSessionsSelect.value;
+  if(existing) name=existing;
+  if(!name) return alert('Digite um nome de sessão ou selecione sessão ativa');
+  currentSession=name;
+  status.textContent='🚀 Iniciando sessão...';
   socket.emit('start-session', name);
-  status.textContent = '🚀 Iniciando sessão...';
 }
 
-socket.on('log', log);
-
-socket.on('qr', d => {
-  qrBox.style.display = 'block';
-  downloadBox.style.display = 'none';
-  QRCode.toCanvas(qrCanvas, d.qr, { width:260 });
-  qrInfo.textContent = `Tentativa ${d.attempt}/15`;
-  status.textContent = '📷 Escaneie o QR Code';
-});
-
-socket.on('session-ready', d => {
-  qrBox.style.display = 'none';
-  downloadBox.style.display = 'block';
-  sessionTitle.textContent = 'Sessão: ' + d.session;
-
-  if (d.zipStatus === 'ready') {
-    status.textContent = '✅ ZIP pronto';
-    downloadBtn.disabled = false;
-    downloadBtn.textContent = '⬇️ Baixar ZIP';
-    downloadBtn.onclick = () => {
-      window.location.href =
-        'https://busines-3nfg.onrender.com' + d.downloadUrl;
-    };
+// Atualiza sessões ativas
+socket.on('update-active-sessions', d=>{
+  activeSessionsSelect.innerHTML='';
+  if(d.sessions && d.sessions.length>0){
+    d.sessions.forEach(s=>{
+      const opt=document.createElement('option');
+      opt.value=s; opt.textContent=s;
+      activeSessionsSelect.appendChild(opt);
+    });
+  } else {
+    const opt=document.createElement('option');
+    opt.value=''; opt.textContent=d.message || 'Nenhuma sessão ativa';
+    activeSessionsSelect.appendChild(opt);
   }
 });
-</script>
 
+// Receber logs do backend
+socket.on('log', log);
+
+// QR Code
+socket.on('qr', d => {
+  qrBox.style.display='block';
+  QRCode.toCanvas(qrCanvas, d.qr, { width:200 });
+  qrInfo.textContent=`📷 Escaneie o QR Code (${d.attempt}/15)`;
+  status.textContent='📷 Aguardando escaneamento do QR';
+});
+
+// Sessão pronta
+socket.on('session-ready', d => {
+  qrBox.style.display='none';
+  status.textContent='✅ Sessão pronta!';
+  accName.textContent=d.accountInfo.name;
+  accNumber.textContent=d.accountInfo.number;
+  accountBox.style.display='block';
+
+  currentGroups = d.accountInfo.groups;
+  groupsBox.style.display='block';
+  groupsBox.innerHTML='';
+  d.accountInfo.groups.forEach(g=>{
+    const div=document.createElement('div');
+    div.className='group';
+    div.innerHTML=`<strong>${g.name} (${g.members.length})</strong>`;
+    groupsBox.appendChild(div);
+  });
+});
+
+// Adicionar membros
+function openAddMembers(){
+  let html=`
+    <h3>Adicionar membros</h3>
+    <select id="selGroup">${currentGroups.map(g=>`<option value="${g.id}">${g.name}</option>`).join('')}</select>
+    <input type="file" id="fileInput">
+    <button onclick="addMembers()">Adicionar</button>
+  `;
+  popupContent.innerHTML=html;
+  popup.style.display='flex';
+}
+
+function addMembers(){
+  const f=document.getElementById('fileInput').files[0];
+  const groupId=document.getElementById('selGroup').value;
+  if(!f) return alert('Escolha um arquivo');
+  const reader=new FileReader();
+  reader.onload=()=>{
+    const numbers=reader.result.trim().split(',').map(n=>n.trim());
+    popup.style.display='none';
+    progressBar.style.display='block';
+    progress.style.width='0%';
+    progText.textContent='0/'+numbers.length;
+    socket.emit('add-members',{ session: currentSession, groupId, members:numbers });
+  };
+  reader.readAsText(f);
+}
+
+socket.on('add-progress', d => {
+  if(d.error) log('⚠️ '+d.error);
+  if(d.total){
+    const pct=Math.floor((d.added/d.total)*100);
+    progress.style.width=pct+'%';
+    progText.textContent=`${d.added}/${d.total}`;
+  }
+});
+
+socket.on('add-complete', d=>{
+  log(`✅ Adicionados ${d.added}/${d.total}`);
+  setTimeout(()=>progressBar.style.display='none',1500);
+});
+
+// Enviar mensagem
+function openSendMsg(){
+  popupContent.innerHTML=`
+    <h3>Enviar mensagem</h3>
+    <input id="msgNum" placeholder="Número (ex: 551199999...)">
+    <textarea id="msgTxt" placeholder="Mensagem"></textarea>
+    <button onclick="sendMsg()">Enviar</button>
+  `;
+  popup.style.display='flex';
+}
+
+function sendMsg(){
+  const number=document.getElementById('msgNum').value.trim();
+  const text=document.getElementById('msgTxt').value.trim();
+  if(!number || !text) return alert('Preencha número e mensagem');
+  popup.style.display='none';
+  socket.emit('send-message',{ session: currentSession, number, text });
+}
+
+socket.on('msg-status', d=>{
+  if(d.error) log(`❌ Erro ${d.number}: ${d.error}`);
+  if(d.success) log(`📩 Mensagem enviada para ${d.number}`);
+});
+
+popup.onclick=e=>{if(e.target==popup) popup.style.display='none';};
+
+</script>
 </body>
 </html>
