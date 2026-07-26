@@ -5,6 +5,7 @@ const { Client, LocalAuth } = require('whatsapp-web.js');
 const fs = require('fs');
 const path = require('path');
 const cors = require('cors');
+const archiver = require('archiver'); // Requer: npm install archiver
 
 const app = express();
 const server = http.createServer(app);
@@ -19,19 +20,19 @@ app.use(express.urlencoded({ extended: true }));
 const clients = {};
 const qrAttempts = {};
 
-// Envia log para o front-end
+// Envia log para o front-end e console
 function log(socket, session, msg) {
   const m = `[${session}] ${msg}`;
   console.log(m);
   socket.emit('log', m);
 }
 
-// Retorna apenas sessões **ativas/conectadas**
+// Retorna apenas sessões ativas/conectadas
 function getActiveSessions() {
   return Object.keys(clients).filter(s => clients[s] && clients[s].info && clients[s].info.connected);
 }
 
-// Espera pasta de autenticação ser criada
+// Espera pasta de autenticação ser criada no sistema de arquivos
 async function waitForAuthFolder(authPath, socket, session) {
   log(socket, session, '⏳ Aguardando gravação da sessão WhatsApp...');
   for (let i = 0; i < 15; i++) {
@@ -45,25 +46,16 @@ async function waitForAuthFolder(authPath, socket, session) {
   return false;
 }
 
-// Obter informações da conta e grupos
+// Obter informações da conta e lista simples de grupos
 async function getAccountInfo(client) {
   const me = await client.getMe();
   const chats = await client.getChats();
   const groups = chats.filter(c => c.isGroup);
 
-  const groupData = [];
-  for (let group of groups) {
-    const participants = group.participants;
-    const members = participants
-      .filter(p => !p.id.user.startsWith('258'))
-      .map(p => p.id.user);
-
-    groupData.push({
-      id: group.id._serialized,
-      name: group.name,
-      members
-    });
-  }
+  const groupData = groups.map(group => ({
+    id: group.id._serialized,
+    name: group.name
+  }));
 
   return {
     name: me.pushname || 'Sem nome',
@@ -72,7 +64,7 @@ async function getAccountInfo(client) {
   };
 }
 
-// Inicia sessão
+// Inicia sessão e eventos da instância do WhatsApp
 function startSession(socket, session) {
   if (clients[session]) {
     log(socket, session, '⚠️ Sessão já ativa!');
@@ -108,11 +100,11 @@ function startSession(socket, session) {
 
     try {
       const accountInfo = await getAccountInfo(client);
-      client.info.connected = true; // marca como conectado
-      log(socket, session, '📊 Informações da conta e grupos obtidas com sucesso!');
+      client.info.connected = true; // Marca como conectado
+      log(socket, session, '📊 Informações da conta obtidas com sucesso!');
       socket.emit('session-ready', { session, accountInfo });
 
-      // Atualiza sessões ativas para todos os clientes
+      // Atualiza sessões ativas para todos os clientes conectados
       io.emit('update-active-sessions', { sessions: getActiveSessions() });
 
     } catch (e) {
@@ -123,7 +115,7 @@ function startSession(socket, session) {
 
   client.on('disconnected', reason => {
     log(socket, session, '❌ Sessão desconectada: ' + reason);
-    client.info.connected = false;
+    if (client.info) client.info.connected = false;
     socket.emit('session-ended', { session, reason });
 
     // Atualiza sessões ativas para todos os clientes
@@ -133,9 +125,9 @@ function startSession(socket, session) {
   client.initialize();
 }
 
-// Socket.IO
+// Configuração dos eventos Socket.IO
 io.on('connection', socket => {
-  // Envia sessões ativas assim que o usuário acessa
+  // Envia a lista de sessões ativas no momento da conexão
   const active = getActiveSessions();
   if (active.length === 0) {
     socket.emit('update-active-sessions', { sessions: [], message: 'Nenhuma sessão ativa' });
@@ -143,6 +135,7 @@ io.on('connection', socket => {
     socket.emit('update-active-sessions', { sessions: active });
   }
 
+  // Evento para iniciar ou retomar uma sessão
   socket.on('start-session', session => {
     if (!session || !session.trim()) {
       socket.emit('log', '❌ Nome da sessão inválido');
@@ -151,34 +144,56 @@ io.on('connection', socket => {
     startSession(socket, session.trim());
   });
 
-  // Adicionar membros
-  socket.on('add-members', async data => {
-    const { session, groupId, members } = data;
-    const client = clients[session];
-    if (!client || !client.info.connected) return socket.emit('add-progress', { error: 'Sessão inválida ou desconectada' });
-
-    let added = 0;
-    socket.emit('add-progress', { total: members.length, added });
-
-    for (let m of members) {
-      try {
-        await client.addParticipant(groupId, `${m}@c.us`);
-        added++;
-        socket.emit('add-progress', { total: members.length, added });
-      } catch (e) {
-        socket.emit('add-progress', { total: members.length, added, error: `Erro ao adicionar ${m}: ${e.message}` });
-      }
+  // NOVO: Evento para download da pasta de dados da sessão em ZIP
+  socket.on('download-session', async (sessionName) => {
+    if (!sessionName) {
+      return socket.emit('log', '❌ Nenhuma sessão selecionada para download.');
     }
 
-    socket.emit('add-complete', { total: members.length, added });
-    log(socket, session, `✅ Adicionados ${added}/${members.length} membros ao grupo`);
+    const authPath = path.join(__dirname, '.wwebjs_auth', `session-${sessionName}`);
+
+    if (!fs.existsSync(authPath)) {
+      log(socket, sessionName, `❌ Pasta de autenticação não encontrada em: ${authPath}`);
+      return socket.emit('log', `❌ Erro: Dados de sessão para "${sessionName}" não existem no servidor.`);
+    }
+
+    try {
+      log(socket, sessionName, '📦 Compactando dados de sessão em arquivo ZIP...');
+
+      const buffers = [];
+      const archive = archiver('zip', { zlib: { level: 9 } });
+
+      archive.on('data', data => buffers.push(data));
+      archive.on('end', () => {
+        const zipBuffer = Buffer.concat(buffers);
+        const base64Zip = zipBuffer.toString('base64');
+        socket.emit('session-zip-data', {
+          session: sessionName,
+          zipBase64: base64Zip,
+          fileName: `session-${sessionName}.zip`
+        });
+        log(socket, sessionName, '✅ Arquivo ZIP da sessão gerado e enviado para o navegador!');
+      });
+
+      archive.on('error', err => {
+        log(socket, sessionName, '❌ Erro ao zipar sessão: ' + err.message);
+      });
+
+      archive.directory(authPath, false);
+      await archive.finalize();
+
+    } catch (e) {
+      log(socket, sessionName, '❌ Erro no processo de exportação ZIP: ' + e.message);
+    }
   });
 
-  // Enviar mensagem
+  // Enviar mensagem individual
   socket.on('send-message', async info => {
     const { session, number, text } = info;
     const client = clients[session];
-    if (!client || !client.info.connected) return socket.emit('msg-status', { error: 'Sessão inválida ou desconectada' });
+    if (!client || !client.info || !client.info.connected) {
+      return socket.emit('msg-status', { error: 'Sessão inválida ou desconectada' });
+    }
 
     try {
       await client.sendMessage(`${number}@c.us`, text);
