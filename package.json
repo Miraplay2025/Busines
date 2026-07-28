@@ -6,10 +6,11 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "express": "*",
-    "socket.io": "*",
-    "whatsapp-web.js": "*",
-    "qrcode": "*",
-    "archiver": "*"
+    "archiver": "^7.0.1",
+    "express": "^4.19.2",
+    "qrcode": "^1.5.3",
+    "socket.io": "^4.7.5",
+    "unzipper": "^0.12.3",
+    "whatsapp-web.js": "^1.26.0"
   }
 }
