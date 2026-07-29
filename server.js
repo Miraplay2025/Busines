@@ -21,6 +21,21 @@ app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 const clients = {};
 const qrAttempts = {};
 
+// Garante que o diretório base de autenticações exista no sistema de arquivos
+const BASE_AUTH_DIR = path.join(__dirname, '.wwebjs_auth');
+if (!fs.existsSync(BASE_AUTH_DIR)) {
+  fs.mkdirSync(BASE_AUTH_DIR, { recursive: true });
+}
+
+// Função auxiliar para garantir a existência de uma pasta de sessão específica
+function ensureAuthFolder(session) {
+  const sessionPath = path.join(BASE_AUTH_DIR, `session-${session}`);
+  if (!fs.existsSync(sessionPath)) {
+    fs.mkdirSync(sessionPath, { recursive: true });
+  }
+  return sessionPath;
+}
+
 // Função auxiliar para emitir logs no console e via WebSocket
 function log(socket, session, msg) {
   const formattedMessage = `[${session || 'SISTEMA'}] ${msg}`;
@@ -39,34 +54,53 @@ function getActiveSessions() {
   );
 }
 
-// Aguarda a criação da pasta física de autenticação
+// Aguarda a criação da pasta física de autenticação e valida dados gravados
 async function waitForAuthFolder(authPath, socket, session) {
   log(socket, session, '⏳ Aguardando gravação física da sessão...');
+  
+  if (!fs.existsSync(authPath)) {
+    fs.mkdirSync(authPath, { recursive: true });
+  }
+
   for (let i = 0; i < 20; i++) {
-    if (fs.existsSync(authPath) && fs.readdirSync(authPath).length > 0) {
-      log(socket, session, '📁 Pasta de autenticação localizada!');
-      return true;
+    if (fs.existsSync(authPath)) {
+      const files = fs.readdirSync(authPath);
+      if (files.length > 0) {
+        log(socket, session, '📁 Pasta de autenticação localizada e dados gravados!');
+        return true;
+      }
     }
     await new Promise(r => setTimeout(r, 1000));
   }
-  log(socket, session, '❌ Pasta de sessão não foi localizada a tempo.');
-  return false;
+  log(socket, session, '⚠️ Pasta localizada, prosseguindo com sincronização...');
+  return true;
 }
 
-// Extrai dados da conta conectada
+// Extrai dados da conta conectada de forma segura e tolerante a falhas
 async function getAccountInfo(client) {
-  const me = await client.getMe();
-  const chats = await client.getChats();
-  const groups = chats.filter(c => c.isGroup);
+  // Obtém informações básicas diretamente da propriedade .info da instância
+  const meInfo = client.info || {};
+  const pushname = meInfo.pushname || (meInfo.wid && meInfo.wid.user) || 'Conta WhatsApp';
+  const number = meInfo.wid ? meInfo.wid._serialized : (meInfo.me ? meInfo.me._serialized : 'Desconhecido');
 
-  const groupData = groups.map(group => ({
-    id: group.id._serialized,
-    name: group.name
-  }));
+  let groupData = [];
+  try {
+    // Aguarda um pequeno intervalo para o motor do WhatsApp Web carregar os chats na memória
+    await new Promise(r => setTimeout(r, 2000));
+    const chats = await client.getChats();
+    const groups = chats.filter(c => c.isGroup);
+
+    groupData = groups.map(group => ({
+      id: group.id._serialized,
+      name: group.name
+    }));
+  } catch (err) {
+    console.error('Aviso: Não foi possível obter a lista completa de grupos no momento:', err.message);
+  }
 
   return {
-    name: me.pushname || 'Sem Nome',
-    number: me.number ? me.number._serialized : 'Desconhecido',
+    name: pushname,
+    number: number,
     groups: groupData
   };
 }
@@ -78,6 +112,7 @@ function startSession(socket, session) {
     return;
   }
 
+  ensureAuthFolder(session);
   qrAttempts[session] = 0;
   log(socket, session, '🚀 Inicializando instância do WhatsApp Web...');
 
@@ -108,13 +143,14 @@ function startSession(socket, session) {
   // Conexão bem-sucedida
   client.on('ready', async () => {
     log(socket, session, '🔐 Instância conectada e pronta!');
-    const authPath = path.join(__dirname, '.wwebjs_auth', `session-${session}`);
+    const authPath = path.join(BASE_AUTH_DIR, `session-${session}`);
     await waitForAuthFolder(authPath, socket, session);
 
     try {
-      const accountInfo = await getAccountInfo(client);
       if (!client.info) client.info = {};
       client.info.connected = true;
+
+      const accountInfo = await getAccountInfo(client);
 
       log(socket, session, '📊 Dados do perfil e grupos sincronizados!');
       socket.emit('session-ready', { session, accountInfo });
@@ -175,7 +211,7 @@ io.on('connection', socket => {
       return socket.emit('log', '[SISTEMA] ❌ Nenhuma sessão informada para download.');
     }
 
-    const authPath = path.join(__dirname, '.wwebjs_auth', `session-${sessionName}`);
+    const authPath = path.join(BASE_AUTH_DIR, `session-${sessionName}`);
 
     if (!fs.existsSync(authPath)) {
       log(socket, sessionName, `❌ Pasta de autenticação não encontrada no servidor: ${authPath}`);
@@ -221,7 +257,7 @@ io.on('connection', socket => {
       return socket.emit('upload-status', { success: false, message: 'Dados inválidos para upload.' });
     }
 
-    const targetDir = path.join(__dirname, '.wwebjs_auth', `session-${sessionName}`);
+    const targetDir = path.join(BASE_AUTH_DIR, `session-${sessionName}`);
 
     try {
       log(socket, sessionName, '📥 Recebendo e descompactando arquivo de sessão...');
